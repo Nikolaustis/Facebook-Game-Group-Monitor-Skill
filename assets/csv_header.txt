@@ -1,0 +1,2 @@
+snapshot_date,region,game_name,group_name,group_url,group_id,group_size,today_posts,week_new_fans,existed_last_month,is_relevant,language_signal,action,action_reason,risk_level
+
