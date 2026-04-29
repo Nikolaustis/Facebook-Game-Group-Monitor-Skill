@@ -1,0 +1,163 @@
+{
+  "games": [
+    "LINE Rangers",
+    "sealm on cross"
+  ],
+  "aliases": {
+    "LINE Rangers": [],
+    "sealm on cross": []
+  },
+  "sibling_titles": {
+    "LINE Rangers": [],
+    "sealm on cross": []
+  },
+  "ip_roots": {
+    "LINE Rangers": [
+      "LINE"
+    ],
+    "sealm on cross": [
+      "sealm"
+    ]
+  },
+  "threshold": 10,
+  "allowed_language_signals": [],
+  "allowed_regions": [],
+  "language_to_region": {
+    "Thai": "TH",
+    "Vietnamese": "VN",
+    "Chinese": "CN",
+    "English": "",
+    "Spanish": "",
+    "Portuguese": "",
+    "Indonesian": "",
+    "Malay": "",
+    "Filipino": "",
+    "Japanese": "",
+    "Korean": "",
+    "French": "",
+    "German": "",
+    "Russian": "",
+    "Arabic": "",
+    "Turkish": "",
+    "Hindi": "",
+    "Mixed": "",
+    "Unknown": ""
+  },
+  "region_keywords": {
+    "TH": [
+      "th",
+      "thai",
+      "thailand"
+    ],
+    "VN": [
+      "vn",
+      "viet nam",
+      "vietnam"
+    ],
+    "PH": [
+      "ph",
+      "pinoy",
+      "philippines",
+      "pilipinas"
+    ],
+    "ID": [
+      "id",
+      "indo",
+      "indonesia"
+    ],
+    "MY": [
+      "malaysia"
+    ],
+    "SG": [
+      "sg",
+      "singapore"
+    ],
+    "LATAM": [
+      "latam",
+      "latin america",
+      "latinoamerica"
+    ],
+    "MX": [
+      "mexico"
+    ],
+    "ES": [
+      "spain",
+      "espana"
+    ],
+    "AR": [
+      "argentina"
+    ],
+    "CL": [
+      "chile"
+    ],
+    "CO": [
+      "colombia"
+    ],
+    "PE": [
+      "peru"
+    ],
+    "BR": [
+      "br",
+      "brasil",
+      "brazil"
+    ],
+    "US": [
+      "usa",
+      "u.s.",
+      "u.s.a.",
+      "united states"
+    ],
+    "CA": [
+      "canada"
+    ],
+    "UK": [
+      "uk",
+      "u.k.",
+      "united kingdom"
+    ],
+    "AU": [
+      "australia"
+    ],
+    "JP": [
+      "jp",
+      "japan"
+    ],
+    "KR": [
+      "kr",
+      "korea",
+      "korean"
+    ],
+    "TW": [
+      "tw",
+      "taiwan"
+    ],
+    "HK": [
+      "hk",
+      "hong kong"
+    ],
+    "CN": [
+      "cn",
+      "china"
+    ],
+    "IN": [
+      "india",
+      "bharat"
+    ],
+    "RU": [
+      "russia"
+    ],
+    "TR": [
+      "turkey",
+      "turkiye"
+    ],
+    "DE": [
+      "germany",
+      "deutschland"
+    ],
+    "FR": [
+      "france"
+    ]
+  },
+  "cdp_url": "http://127.0.0.1:9222",
+  "snapshot_date": "YYYY-MM-DD"
+}
