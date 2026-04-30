@@ -1,0 +1,4 @@
+version: 1
+display_name: Facebook Group Monitor V3.2
+short_description: 严格版 Facebook 游戏群组监测技能，支持兄弟游戏硬排斥、Unicode 匹配、人工复核队列和全球地区识别
+default_prompt: 按 V3.2 流程运行 Facebook 群组监测。先执行登录阶段；在用户回复“已登录”前不要搜索、采集、分析或生成报告。登录后按第一轮原词搜索、停止确认、第二轮严格筛选执行，并输出 CSV、Excel、中文摘要、manual_review_queue.csv、collision_report.json 和 audit_stats.json。
