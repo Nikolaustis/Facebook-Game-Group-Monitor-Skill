@@ -1,7 +1,0 @@
-node_modules/
-runs/
-*.zip
-*.log
-Thumbs.db
-.DS_Store
-README_*_v2.md
