@@ -1,32 +1,57 @@
-# 质量检查清单（V3）
+# 质量检查清单 V3.6.1
 
 ## 运行前
-- [ ] 已完成 Facebook 登录
-- [ ] 游戏名列表确认无误
-- [ ] threshold 已确认（默认 10）
+
+- [ ] 已完成 Facebook 手动登录。
+- [ ] 游戏名列表确认无误，尤其是多游戏批量任务中的相近标题。
+- [ ] 如需启用 `connector_x` 或 seed URL，已在 `title_variant_overrides` 中按游戏单独配置。
+- [ ] 未把某个游戏的特殊变体写成全局规则。
+- [ ] threshold 已确认，默认 `10`。
 
 ## 第一轮后
-- [ ] 每个游戏都生成了 `phase1_*_candidates.json`
-- [ ] 每个游戏都生成了 `phase1_*_stats.json`
-- [ ] 已人工确认是否停止深翻
+
+- [ ] 每个游戏都生成了 `phase1_*_candidates.json`。
+- [ ] 每个游戏都生成了 `phase1_*_stats.json`。
+- [ ] `phase1_index.json` 中每个游戏都有 `search_plan` 和 `query_runs`。
+- [ ] 候选中保留 `source_query`、`query_variant_type`、`source_is_seed_url` 等字段。
+- [ ] 到达深翻停止条件后，已向用户确认“可以停止，继续 / 继续深翻”。
 
 ## 第二轮后
-- [ ] 输出 CSV / XLSX / summary.json / manual_review_queue.csv 成功生成
-- [ ] 检查 `collision_report.json` 是否出现大量并列冲突
-- [ ] 检查 `audit_stats.json` 中 `dropped_collision`、`dropped_lang_region` 是否异常偏高
-- [ ] 检查 `manual_review_queue.csv` 是否已收集 full_text 命中、兄弟标题命中、IP 大词根命中记录
-- [ ] 抽查 `language_signal` 是否来自群组名称 + 关于这个小组的非 UI 文本 + 讨论区前五条可见玩家发言，而不是 about 整页 UI 文本或 Facebook 中文/英文界面 UI 文案
-- [ ] 抽查语言优先级是否符合 V3.5：讨论区前五条玩家发言优先，群名辅助，about 仅在存在用户手写非 UI 内容时低优先级兜底
-- [ ] 非公开小组或 about 无手写描述时，不得把 Facebook 中文结构文案识别成 `Chinese`
-- [ ] 抽查拉丁语系群组是否被英文游戏词误判为 `English`；若群名/about/帖子出现法语、西语、葡语等功能词，应优先识别对应语言
 
-## 抽检重点
-- [ ] 同一 `group_url` 在最终 CSV 中只出现一次
-- [ ] `LINE Rangers` 不应大面积吸入 `LINE Idle Rangers`
-- [ ] `Soul Land` 各子标题之间不应互相串群
-- [ ] `Ragnarok` 各子标题不应仅靠词根互相命中
-- [ ] `group_name` 命中兄弟游戏标题的记录，不应进入最终 CSV
-- [ ] `exact_phrase_in_full_text` 的记录，应进入 `manual_review_queue.csv` 而非最终 CSV
-- [ ] `region` 应优先来自群组名称中的明确地区语义关键词；不得从 about 整页文本、UI 文案或泛文本中推断 `US` / `UK`
-- [ ] English / Spanish / Chinese / Arabic 只能作为语言展示，不得单独映射成国家地区
-- [ ] 若配置了 `allowed_language_signals` / `allowed_regions`，最终输出应符合配置限制
+- [ ] 成功生成 `fb_monitoring_filtered.xlsx`。
+- [ ] `fb_monitoring_filtered.xlsx` 包含 `detail` sheet。
+- [ ] `fb_monitoring_filtered.xlsx` 包含 `manual_review` sheet。
+- [ ] 成功生成 `fb_monitoring_filtered_summary.json`、`collision_report.json`、`audit_stats.json`、`debug_rows.json`。
+- [ ] 未生成或依赖 CSV 输出文件。
+- [ ] `collision_report.json` 没有异常大量并列冲突。
+- [ ] `audit_stats.json` 中 `dropped_collision`、`dropped_lang_region` 没有异常偏高。
+
+## Excel 格式
+
+- [ ] `snapshot_date` 为文本日期，不是 Excel 序列号。
+- [ ] `group_id` 为文本，不是科学计数法。
+- [ ] `活跃指数=当日新帖/社群规模` 为公式列，百分比格式，2 位小数。
+- [ ] `规模增速=上周新增/(社群规模-上周新增）` 为公式列，百分比格式，2 位小数。
+- [ ] 非 ASCII 群名正常显示，例如泰语、越南语、老挝语、日文、韩文等不乱码。
+
+## 语言与地区
+
+- [ ] 语言优先级符合 V3.6.1：讨论区前五条玩家发言优先，群名辅助，about 仅在存在用户手写非 UI 内容时低优先级兜底。
+- [ ] 非公开小组或 about 无手写描述时，不得把 Facebook 中文结构文案识别成 `Chinese`。
+- [ ] 拉丁语系群组不应因为英文游戏词被误判为 `English`。
+- [ ] 地区优先来自群组名称中的明确地区语义。
+- [ ] 不得从 about 整页文本、Facebook UI 文案或泛文本中推断 `US` / `UK`。
+- [ ] English / Spanish / Chinese / Arabic / French / Portuguese / Mixed 只作为语言展示，不得单独映射成国家地区。
+
+## 相关性
+
+- [ ] 同一个 `group_url` 在 `detail` 中只出现一次。
+- [ ] 多游戏批量检索时，同批次其他游戏已自动作为兄弟标题排斥。
+- [ ] `Anime Rangers X`、`Ragnarok X: Next Generation` 中的 `X` 未被删除或当作可选连接符。
+- [ ] `LINE Rangers` 不应大面积吸入 `LINE Idle Rangers`。
+- [ ] `Soul Land` 各子标题之间不应互相串群。
+- [ ] `Ragnarok` 各子标题不应仅靠词根互相命中。
+- [ ] `group_name` 命中兄弟游戏标题的记录，不应进入 `detail`。
+- [ ] `exact_phrase_in_full_text` 记录应进入 `manual_review`，而不是 `detail`。
+- [ ] `compact_title_in_group_name` 可以进入 `detail`，但应能在 `debug_rows.json` 查到命中来源。
+- [ ] `connector_x_title_in_group_name` 只有通过更高活跃门槛后才可进入 `detail`。

@@ -167,5 +167,22 @@
     ]
   },
   "cdp_url": "http://127.0.0.1:9222",
-  "snapshot_date": "YYYY-MM-DD"
+  "snapshot_date": "YYYY-MM-DD",
+  "title_variant_overrides": {
+    "All Star Tower Defense": {
+      "search_variants": [
+        {
+          "query": "All Star X Tower Defense",
+          "type": "connector_x",
+          "min_group_size": 1000,
+          "min_today_posts": 20,
+          "min_week_new_fans": 50
+        }
+      ],
+      "seed_group_urls": [
+        "https://www.facebook.com/groups/1992312010946763",
+        "https://www.facebook.com/groups/allstarshinobi"
+      ]
+    }
+  }
 }

@@ -3,6 +3,28 @@ const path = require('path');
 const { chromium } = require('playwright');
 const XLSX = require('xlsx');
 
+let emergencyFlush = null;
+
+function emergencyExit(reason, exitCode) {
+  try {
+    if (typeof emergencyFlush === 'function') emergencyFlush(reason);
+  } catch (err) {
+    console.error(`[phase2] emergency checkpoint failed: ${err && err.stack ? err.stack : err}`);
+  }
+  process.exit(exitCode);
+}
+
+process.once('SIGINT', () => emergencyExit('SIGINT', 130));
+process.once('SIGTERM', () => emergencyExit('SIGTERM', 143));
+process.once('uncaughtException', (err) => {
+  console.error(err && err.stack ? err.stack : err);
+  emergencyExit(`uncaughtException: ${err && err.message ? err.message : err}`, 1);
+});
+process.once('unhandledRejection', (err) => {
+  console.error(err && err.stack ? err.stack : err);
+  emergencyExit(`unhandledRejection: ${err && err.message ? err.message : err}`, 1);
+});
+
 function clean(s) {
   return (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -96,6 +118,9 @@ const EXTRA_LANGUAGE_KEYWORDS = {
   Dutch: ['nederlands', 'nederland', 'belgie', 'groep', 'spelers', 'kopen', 'verkopen', 'ruilen'],
   Polish: ['polski', 'polska', 'grupa', 'gracze', 'sprzedam', 'kupie', 'wymiana'],
   Turkish: ['turkce', 'oyuncu', 'grup', 'satis', 'alis', 'hesap'],
+  Lao: ['lao', 'laos'],
+  Khmer: ['khmer', 'cambodia'],
+  Burmese: ['burmese', 'myanmar'],
   English: ['community', 'players', 'buy', 'sell', 'trade', 'account', 'accounts', 'guide', 'tips'],
 };
 
@@ -126,6 +151,9 @@ const SCRIPT_LANGUAGE_PATTERNS = {
   Hindi: /[\u0900-\u097F]/g,
   Greek: /[\u0370-\u03FF]/g,
   Hebrew: /[\u0590-\u05FF]/g,
+  Lao: /[\u0E80-\u0EFF]/g,
+  Khmer: /[\u1780-\u17FF]/g,
+  Burmese: /[\u1000-\u109F]/g,
 };
 
 const DEFAULT_LANGUAGE_TO_REGION = {
@@ -134,9 +162,12 @@ const DEFAULT_LANGUAGE_TO_REGION = {
   Indonesian: 'ID',
   Malay: 'MY',
   Filipino: 'PH',
+  Lao: 'LA',
+  Khmer: 'KH',
+  Burmese: 'MM',
 };
 
-const LANGUAGE_REGION_AUX_ALLOWED = new Set(['Thai', 'Vietnamese', 'Indonesian', 'Malay', 'Filipino']);
+const LANGUAGE_REGION_AUX_ALLOWED = new Set(['Thai', 'Vietnamese', 'Indonesian', 'Malay', 'Filipino', 'Lao', 'Khmer', 'Burmese']);
 
 const DEFAULT_REGION_KEYWORDS = {
   TH: ['th', 'thai', 'thailand'],
@@ -144,6 +175,9 @@ const DEFAULT_REGION_KEYWORDS = {
   PH: ['ph', 'pinoy', 'philippines', 'pilipinas'],
   ID: ['id', 'indo', 'indonesia'],
   MY: ['malaysia'],
+  LA: ['laos', 'lao'],
+  KH: ['cambodia', 'khmer'],
+  MM: ['myanmar', 'burma', 'burmese'],
   SG: ['sg', 'singapore'],
   LATAM: ['latam', 'latham', 'latin america', 'latinoamerica', 'latinoamérica', 'america latina', 'américa latina'],
   MX: ['mexico', 'méxico', 'mexicano', 'mexicana'],
@@ -279,6 +313,31 @@ function languageEvidenceText(groupName, aboutLanguageText, discussionLanguageTe
     .join('\n');
 }
 
+function sanitizeAboutLanguageText(aboutLanguageText) {
+  const lines = clean(aboutLanguageText || '')
+    .split(/\n+/)
+    .map((x) => clean(x))
+    .filter(Boolean)
+    .filter((x) => !looksLikeUiLine(x));
+  const kept = [];
+  for (const line of lines) {
+    const cjk = countChineseChars(line);
+    const latin = countEnglishLetters(line);
+    const nonCjkScript =
+      countThaiChars(line) +
+      countVnDiacritics(line) +
+      countPattern(line, /[\u3040-\u30FF]/g) +
+      countPattern(line, /[\uAC00-\uD7AF]/g) +
+      countPattern(line, /[\u0400-\u04FF]/g) +
+      countPattern(line, /[\u0600-\u06FF]/g) +
+      countPattern(line, /[\u0900-\u097F]/g);
+    // If an about line is only Chinese UI-like structure, ignore it. Real user descriptions usually contain game/social terms or another script.
+    if (cjk > 0 && latin === 0 && nonCjkScript === 0) continue;
+    kept.push(line);
+  }
+  return kept.join('\n');
+}
+
 function detectLanguageFromGroupName(groupName) {
   const name = clean(groupName);
   const norm = ` ${stripDiacritics(name.toLowerCase()).replace(/[^\p{Letter}\p{Number}]+/gu, ' ')} `;
@@ -288,6 +347,9 @@ function detectLanguageFromGroupName(groupName) {
   if (/[\u0400-\u04FF]/u.test(name)) return 'Russian';
   if (/[\u3040-\u30FF]/u.test(name)) return 'Japanese';
   if (/[\uAC00-\uD7AF]/u.test(name)) return 'Korean';
+  if (/[\u0E80-\u0EFF]/u.test(name)) return 'Lao';
+  if (/[\u1780-\u17FF]/u.test(name)) return 'Khmer';
+  if (/[\u1000-\u109F]/u.test(name)) return 'Burmese';
   if (countChineseChars(name) >= 2) return 'Chinese';
   if (countVnDiacritics(name) >= 2 || /\b(viet nam|vietnam|viet|mua ban|cong dong|cho|trao doi|quoc te|nap|giao luu)\b/i.test(norm)) return 'Vietnamese';
   if (/\b(espanol|latam|latham|latinoamerica|latin america|america latina|latino|mexico|mexicano|mexicana|comunidad|cambio|venta|comprar|vender)\b/i.test(norm)) return 'Spanish';
@@ -301,15 +363,13 @@ function detectLanguageFromGroupName(groupName) {
   if (/\b(nederlands|nederland|belgie|groep|spelers)\b/i.test(norm)) return 'Dutch';
   if (/\b(polski|polska|grupa|gracze)\b/i.test(norm)) return 'Polish';
   if (/\b(turkce|turkish|turkiye|turkey|oyuncu)\b/i.test(norm)) return 'Turkish';
+  if (/\b(lao|laos)\b/i.test(norm)) return 'Lao';
+  if (/\b(khmer|cambodia)\b/i.test(norm)) return 'Khmer';
+  if (/\b(burmese|myanmar|burma)\b/i.test(norm)) return 'Burmese';
   return '';
 }
 
-function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussionLanguageText, snippet) {
-  const groupNameSignal = detectLanguageFromGroupName(groupName);
-  if (groupNameSignal) return groupNameSignal;
-
-  const evidence = languageEvidenceText(groupName, aboutLanguageText, discussionLanguageText, snippet);
-  const detected = detectLanguageSignal('', evidence, '');
+function normalizeDetectedLanguage(detected, evidence) {
   if (detected === 'Chinese') {
     const cjk = countChineseChars(evidence);
     const latin = countEnglishLetters(evidence);
@@ -317,6 +377,88 @@ function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussi
     if (latin > 0 && cjk / (cjk + latin) < 0.25) return 'English';
   }
   return detected;
+}
+
+function detectSinglePostLanguage(postText) {
+  const evidence = languageEvidenceText('', '', postText, '');
+  if (!evidence) return 'Unknown';
+  const detected = normalizeDetectedLanguage(detectLanguageSignal('', evidence, ''), evidence);
+  if (detected && detected !== 'Unknown' && detected !== 'Mixed') return detected;
+
+  const scriptSignals = [
+    ['Thai', countThaiChars(evidence)],
+    ['Vietnamese', countVnDiacritics(evidence)],
+    ['Chinese', countChineseChars(evidence)],
+    ['Arabic', countPattern(evidence, /[\u0600-\u06FF]/g)],
+    ['Hindi', countPattern(evidence, /[\u0900-\u097F]/g)],
+    ['Russian', countPattern(evidence, /[\u0400-\u04FF]/g)],
+    ['Japanese', countPattern(evidence, /[\u3040-\u30FF]/g)],
+    ['Korean', countPattern(evidence, /[\uAC00-\uD7AF]/g)],
+    ['Lao', countPattern(evidence, /[\u0E80-\u0EFF]/g)],
+    ['Khmer', countPattern(evidence, /[\u1780-\u17FF]/g)],
+    ['Burmese', countPattern(evidence, /[\u1000-\u109F]/g)],
+  ].filter(([, count]) => count >= 2);
+  if (scriptSignals.length === 1) return scriptSignals[0][0];
+  if (scriptSignals.length > 1) return 'Mixed';
+
+  const latin = countEnglishLetters(evidence);
+  if (latin >= 20) return 'English';
+  return 'Unknown';
+}
+
+function detectDiscussionLanguageFromPosts(discussionLanguageText) {
+  const raw = discussionLanguageText || '';
+  const posts = raw
+    .split(/\n---POST---\n|\n\s*\n+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  if (!posts.length) return '';
+
+  const languages = [];
+  for (const post of posts) {
+    const lang = detectSinglePostLanguage(post);
+    if (lang && lang !== 'Unknown') languages.push(lang);
+  }
+  const uniqueLangs = unique(languages);
+  if (uniqueLangs.length > 1) return 'Mixed';
+  if (uniqueLangs.length === 1) return uniqueLangs[0];
+  return '';
+}
+
+function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussionLanguageText, snippet) {
+  const discussionEvidence = languageEvidenceText('', '', discussionLanguageText, '');
+  if (discussionEvidence) {
+    const postLevelLanguage = detectDiscussionLanguageFromPosts(discussionLanguageText);
+    if (postLevelLanguage) return postLevelLanguage;
+
+    const discussionDetected = normalizeDetectedLanguage(detectLanguageSignal('', discussionEvidence, ''), discussionEvidence);
+    if (discussionDetected && discussionDetected !== 'Unknown' && discussionDetected !== 'Mixed') {
+      return discussionDetected;
+    }
+  }
+
+  const groupNameSignal = detectLanguageFromGroupName(groupName);
+  if (groupNameSignal) {
+    if (!discussionEvidence || groupNameSignal !== 'Chinese') return groupNameSignal;
+  }
+
+  if (discussionEvidence) {
+    const discussionDetected = normalizeDetectedLanguage(detectLanguageSignal(groupName || '', discussionEvidence, ''), discussionEvidence);
+    if (discussionDetected && discussionDetected !== 'Unknown') return discussionDetected;
+  }
+
+  const aboutEvidence = sanitizeAboutLanguageText(aboutLanguageText);
+  if (aboutEvidence) {
+    const aboutDetected = normalizeDetectedLanguage(detectLanguageSignal('', aboutEvidence, ''), aboutEvidence);
+    // About text is lowest priority and may contain localized Facebook structure text.
+    // Never let about-only evidence create a Chinese label unless discussion/group name already proved it.
+    if (aboutDetected && aboutDetected !== 'Unknown' && aboutDetected !== 'Chinese') return aboutDetected;
+  }
+
+  const fallbackEvidence = languageEvidenceText(groupName, '', '', snippet);
+  const fallbackDetected = normalizeDetectedLanguage(detectLanguageSignal('', fallbackEvidence, ''), fallbackEvidence);
+  return fallbackDetected || 'Unknown';
 }
 
 function defaultLanguageToRegion(languageSignal) {
@@ -427,7 +569,32 @@ function buildGameProfile(gameName, aliases) {
   return { gameName, rawPhrases, compactPhrases, strongTokens };
 }
 
-function buildGameProfileV3(gameName, aliases, siblingTitles, ipRoots) {
+function buildConfiguredTitleVariants(gameName, config) {
+  const overrides = config.title_variant_overrides && typeof config.title_variant_overrides === 'object'
+    ? config.title_variant_overrides
+    : {};
+  const override = overrides[gameName] || {};
+  const explicitVariants = Array.isArray(override.search_variants) ? override.search_variants : [];
+  const out = [];
+  for (const item of explicitVariants) {
+    if (typeof item === 'string') {
+      out.push({ query: clean(item), type: 'configured_variant' });
+      continue;
+    }
+    if (item && typeof item === 'object' && clean(item.query)) {
+      out.push({
+        query: clean(item.query),
+        type: clean(item.type) || 'configured_variant',
+        min_group_size: item.min_group_size,
+        min_today_posts: item.min_today_posts,
+        min_week_new_fans: item.min_week_new_fans,
+      });
+    }
+  }
+  return out.filter((x) => x.query);
+}
+
+function buildGameProfileV3(gameName, aliases, siblingTitles, ipRoots, config = {}) {
   const base = buildGameProfile(gameName, aliases);
   const siblingRawPhrases = unique((Array.isArray(siblingTitles) ? siblingTitles : []).map((s) => clean(s)).filter(Boolean));
   const siblingCompactPhrases = unique(siblingRawPhrases.map((s) => normalizeCompact(s)).filter(Boolean));
@@ -437,12 +604,16 @@ function buildGameProfileV3(gameName, aliases, siblingTitles, ipRoots) {
       .filter(Boolean)
   );
   const ipRootCompactPhrases = unique(ipRootRawPhrases.map((s) => normalizeCompact(s)).filter(Boolean));
+  const configuredTitleVariants = buildConfiguredTitleVariants(gameName, config);
+  const connectorXVariants = configuredTitleVariants.filter((x) => x.type === 'connector_x');
   return {
     ...base,
     siblingRawPhrases,
     siblingCompactPhrases,
     ipRootRawPhrases,
     ipRootCompactPhrases,
+    configuredTitleVariants,
+    connectorXVariants,
   };
 }
 
@@ -450,6 +621,33 @@ function phrasePresent(compactText, compactPhrases) {
   let best = '';
   for (const p of compactPhrases) {
     if (p && compactText.includes(p) && p.length > best.length) best = p;
+  }
+  return best;
+}
+
+function phrasePresentWords(normText, rawPhrases) {
+  const padded = ` ${normalizeWords(normText)} `;
+  let best = '';
+  for (const phrase of rawPhrases || []) {
+    const normalized = normalizeWords(phrase).trim();
+    if (!normalized) continue;
+    if (padded.includes(` ${normalized} `) && normalized.length > best.length) best = normalized;
+  }
+  return best;
+}
+
+function variantPhrasePresent(groupName, variants) {
+  const normGroup = normalizeWords(groupName || '');
+  const compactGroup = normalizeCompact(groupName || '');
+  let best = null;
+  for (const variant of variants || []) {
+    const phrase = clean(variant.query);
+    if (!phrase) continue;
+    const norm = normalizeWords(phrase).trim();
+    const compact = normalizeCompact(phrase);
+    const matched = (norm && ` ${normGroup} `.includes(` ${norm} `)) || (compact && compactGroup.includes(compact));
+    if (!matched) continue;
+    if (!best || compact.length > normalizeCompact(best.query).length) best = variant;
   }
   return best;
 }
@@ -464,10 +662,12 @@ function matchGame(profile, groupName, aboutText, snippet) {
   const fullText = clean(`${groupName || ''}\n${aboutText || ''}\n${snippet || ''}`);
   const compactGroup = normalizeCompact(groupName || '');
   const compactFull = normalizeCompact(fullText);
-  const exactGroup = phrasePresent(compactGroup, profile.compactPhrases);
+  const exactGroupWords = phrasePresentWords(groupName || '', profile.rawPhrases);
+  const compactGroupHit = phrasePresent(compactGroup, profile.compactPhrases);
+  const connectorXHit = variantPhrasePresent(groupName || '', profile.connectorXVariants || []);
   const negativeGroup = phrasePresent(compactGroup, profile.siblingCompactPhrases || []);
 
-  if (negativeGroup && (!exactGroup || negativeGroup.length > exactGroup.length)) {
+  if (negativeGroup && (!compactGroupHit || negativeGroup.length > compactGroupHit.length)) {
     return {
       matched: false,
       score: 0,
@@ -479,17 +679,43 @@ function matchGame(profile, groupName, aboutText, snippet) {
     };
   }
 
-  if (exactGroup) {
+  if (exactGroupWords) {
     return {
       matched: true,
-      score: 300 + exactGroup.length,
+      score: 300 + normalizeCompact(exactGroupWords).length,
       type: 'exact_phrase_in_group_name',
-      phrase: exactGroup,
+      phrase: exactGroupWords,
       negative_hit: '',
       review_reason: '',
       manual_review: false,
     };
   }
+
+  if (compactGroupHit) {
+    return {
+      matched: true,
+      score: 285 + compactGroupHit.length,
+      type: 'compact_title_in_group_name',
+      phrase: compactGroupHit,
+      negative_hit: '',
+      review_reason: '',
+      manual_review: false,
+    };
+  }
+
+  if (connectorXHit) {
+    return {
+      matched: true,
+      score: 260 + normalizeCompact(connectorXHit.query).length,
+      type: 'connector_x_title_in_group_name',
+      phrase: connectorXHit.query,
+      negative_hit: '',
+      review_reason: '',
+      manual_review: false,
+      variant: connectorXHit,
+    };
+  }
+
   if (negativeGroup) {
     return {
       matched: false,
@@ -590,19 +816,43 @@ function actionFromExisted(existed) {
   return '';
 }
 
-function actionReason(todayPosts, weekNewFans, existed, threshold) {
+function actionReason(todayPosts, weekNewFans, existed, thresholdSpec) {
+  const spec = typeof thresholdSpec === 'object' && thresholdSpec
+    ? thresholdSpec
+    : { today_posts: Number(thresholdSpec || 10), week_new_fans: Number(thresholdSpec || 10) };
   const bits = [];
-  if (todayPosts !== '' && Number(todayPosts) >= threshold) bits.push('today_posts>=threshold');
-  if (weekNewFans !== '' && Number(weekNewFans) >= threshold) bits.push('week_new_fans>=threshold');
+  if (todayPosts !== '' && Number(todayPosts) >= spec.today_posts) bits.push(`today_posts>=${spec.today_posts}`);
+  if (weekNewFans !== '' && Number(weekNewFans) >= spec.week_new_fans) bits.push(`week_new_fans>=${spec.week_new_fans}`);
   if (existed === 'yes') bits.push('existed_last_month=yes');
   else if (existed === 'no') bits.push('existed_last_month=no');
   else bits.push('existed_last_month=missing');
   return bits.join('; ');
 }
+
+function thresholdSpecForMatch(match, globalThreshold) {
+  if (match?.type === 'connector_x_title_in_group_name') {
+    const variant = match.variant || {};
+    return {
+      group_size: Number(variant.min_group_size || 1000),
+      today_posts: Math.max(Number(globalThreshold || 10), Number(variant.min_today_posts || 20)),
+      week_new_fans: Math.max(Number(globalThreshold || 10), Number(variant.min_week_new_fans || 50)),
+      source: 'connector_x_variant_threshold',
+    };
+  }
+  return {
+    group_size: 100,
+    today_posts: Number(globalThreshold || 10),
+    week_new_fans: Number(globalThreshold || 10),
+    source: 'global_threshold',
+  };
+}
+
 function riskLevel(row) {
   const full = row.group_size !== '' && row.today_posts !== '' && row.week_new_fans !== '' && row.existed_last_month !== '';
   if (row.__match_type === 'exact_phrase_in_group_name' && full) return 'low';
-  if (row.__match_type === 'exact_phrase_in_group_name' || row.__match_type === 'exact_phrase_in_full_text') return 'medium';
+  if (row.__match_type === 'compact_title_in_group_name' && full) return 'low';
+  if (row.__match_type === 'connector_x_title_in_group_name') return 'medium';
+  if (row.__match_type === 'exact_phrase_in_group_name' || row.__match_type === 'compact_title_in_group_name' || row.__match_type === 'exact_phrase_in_full_text') return 'medium';
   return 'high';
 }
 
@@ -630,6 +880,31 @@ async function extractPageText(page) {
     if (bodyTxt) chunks.push(bodyTxt);
     const uniq = Array.from(new Set(chunks.filter(Boolean)));
     return uniq.sort((a, b) => b.length - a.length)[0] || '';
+  });
+}
+
+
+async function extractGroupNameFromPage(page) {
+  return page.evaluate(() => {
+    const normalize = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const candidates = [];
+    for (const sel of ['div[role="main"] h1', 'h1', '[role="main"] span[dir="auto"]']) {
+      for (const el of Array.from(document.querySelectorAll(sel))) {
+        const txt = normalize(el.innerText || el.textContent || '');
+        if (txt && txt.length >= 2 && txt.length <= 180) candidates.push(txt);
+      }
+    }
+    const title = normalize(document.title || '').replace(/\s*\|\s*Facebook\s*$/i, '').replace(/\s*\|\s*Meta\s*$/i, '');
+    if (title && title.length <= 180) candidates.push(title);
+    const seen = new Set();
+    for (const c of candidates) {
+      const low = c.toLowerCase();
+      if (seen.has(low)) continue;
+      seen.add(low);
+      if (/^(facebook|groups|about|discussion|home)$/i.test(c)) continue;
+      return c;
+    }
+    return '';
   });
 }
 
@@ -698,9 +973,10 @@ async function fetchAboutWithRetry(page, groupUrl, maxTry = 2) {
         }
         const pageText = await extractPageText(page);
         const languageText = await extractLanguagePageText(page);
+        const pageGroupName = await extractGroupNameFromPage(page);
         if (!pageText || pageText.length < 40) continue;
         if (unavailableText(pageText)) continue;
-        return { ok: true, text: pageText, language_text: languageText, reason: '' };
+        return { ok: true, text: pageText, language_text: languageText, group_name: pageGroupName, reason: '' };
       } catch (_e) {
         // try next attempt/url
       }
@@ -774,7 +1050,7 @@ async function fetchDiscussionLanguageSample(page, groupUrl) {
       return { ok: false, text: '', reason: 'LOGIN_REQUIRED' };
     }
     const postTexts = await extractDiscussionPostTexts(page, 5);
-    const languageText = Array.isArray(postTexts) ? postTexts.join('\n\n') : '';
+    const languageText = Array.isArray(postTexts) ? postTexts.join('\n---POST---\n') : '';
     if (!languageText) {
       return { ok: false, text: '', post_count: 0, reason: 'NO_DISCUSSION_POST_TEXT' };
     }
@@ -784,13 +1060,14 @@ async function fetchDiscussionLanguageSample(page, groupUrl) {
   }
 }
 
-function toCsv(rows, fields) {
-  const esc = (v) => {
-    if (v === null || v === undefined) return '';
-    const s = String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return [fields.join(',')].concat(rows.map((row) => fields.map((f) => esc(row[f])).join(','))).join('\n');
+function normalizeSnapshotDate(value, fallback) {
+  const raw = clean(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(raw)) {
+    const [y, m, d] = raw.split('/');
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  return clean(fallback) || new Date().toISOString().slice(0, 10);
 }
 
 function buildDetailSheet(rows, fields, formulaFields) {
@@ -828,10 +1105,90 @@ function buildDetailSheet(rows, fields, formulaFields) {
       v: groupSize - weekNewFans ? weekNewFans / (groupSize - weekNewFans) : 0,
       z: '0.00%',
     };
-    if (ws[`A${excelRow}`]) ws[`A${excelRow}`].t = 's';
-    if (ws[`G${excelRow}`]) ws[`G${excelRow}`].t = 's';
+    if (ws[`A${excelRow}`]) {
+      ws[`A${excelRow}`].t = 's';
+      ws[`A${excelRow}`].z = '@';
+    }
+    if (ws[`G${excelRow}`]) {
+      ws[`G${excelRow}`].t = 's';
+      ws[`G${excelRow}`].z = '@';
+    }
+  });
+  ws['!cols'] = [
+    { wch: 12, z: '@' },
+    { wch: 10 },
+    { wch: 14 },
+    { wch: 26 },
+    { wch: 46 },
+    { wch: 48 },
+    { wch: 22, z: '@' },
+  ];
+  return ws;
+}
+
+function buildPlainSheet(rows, fields) {
+  const aoa = [fields].concat(rows.map((row) => fields.map((field) => {
+    if (field === 'snapshot_date' || field === 'group_id') {
+      return row[field] === undefined || row[field] === null ? '' : String(row[field]);
+    }
+    return row[field] ?? '';
+  })));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  rows.forEach((row, idx) => {
+    const excelRow = idx + 2;
+    const dateCol = fields.indexOf('snapshot_date');
+    const groupIdCol = fields.indexOf('group_id');
+    for (const colIdx of [dateCol, groupIdCol]) {
+      if (colIdx < 0) continue;
+      const ref = XLSX.utils.encode_cell({ r: excelRow - 1, c: colIdx });
+      if (ws[ref]) {
+        ws[ref].t = 's';
+        ws[ref].z = '@';
+      }
+    }
   });
   return ws;
+}
+
+function renameOverwriting(src, dest) {
+  try {
+    fs.renameSync(src, dest);
+  } catch (err) {
+    if (fs.existsSync(dest)) {
+      try { fs.unlinkSync(dest); } catch (_e) { /* ignore */ }
+    }
+    fs.renameSync(src, dest);
+  }
+}
+
+function atomicWriteText(file, content, encoding = 'utf8') {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, content, encoding);
+  renameOverwriting(tmp, file);
+}
+
+function writeJsonAtomic(file, obj) {
+  atomicWriteText(file, JSON.stringify(obj, null, 2), 'utf8');
+}
+
+function writeWorkbookAtomic(file, wb) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp.xlsx`);
+  try {
+    XLSX.writeFile(wb, tmp);
+    renameOverwriting(tmp, file);
+  } catch (err) {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_e) { /* ignore */ }
+    throw err;
+  }
+}
+
+function writePlainXlsx(file, rows, fields, sheetName = 'verified_partial') {
+  const wb = XLSX.utils.book_new();
+  const ws = buildPlainSheet(rows, fields);
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  writeWorkbookAtomic(file, wb);
 }
 
 function buildSummary(rows) {
@@ -880,6 +1237,18 @@ function buildSummary(rows) {
   };
 }
 
+function collisionRowSummary(r) {
+  return {
+    game_name: r.game_name,
+    match_type: r.__match_type,
+    match_score: r.__match_score,
+    matched_phrase: r.__matched_phrase,
+    source_query: r.__source_query,
+    query_variant_type: r.__query_variant_type,
+    variant_threshold_applied: r.__variant_threshold_applied,
+  };
+}
+
 function resolveCollisions(rows) {
   const byUrl = new Map();
   for (const row of rows) {
@@ -910,7 +1279,9 @@ function resolveCollisions(rows) {
         kept_game_name: topRows[0].game_name,
         kept_match_type: topRows[0].__match_type,
         kept_match_score: topRows[0].__match_score,
-        dropped_games: sorted.slice(1).map((r) => ({ game_name: r.game_name, match_type: r.__match_type, match_score: r.__match_score })),
+        kept_source_query: topRows[0].__source_query,
+        kept_query_variant_type: topRows[0].__query_variant_type,
+        dropped_games: sorted.slice(1).map(collisionRowSummary),
       });
       continue;
     }
@@ -922,7 +1293,7 @@ function resolveCollisions(rows) {
       kept_game_name: '',
       kept_match_type: '',
       kept_match_score: topScore,
-      dropped_games: sorted.map((r) => ({ game_name: r.game_name, match_type: r.__match_type, match_score: r.__match_score })),
+      dropped_games: sorted.map(collisionRowSummary),
     });
   }
 
@@ -933,20 +1304,26 @@ function resolveCollisions(rows) {
   const args = parseArgs(process.argv.slice(2));
   const indexFile = path.resolve(args.index || '');
   if (!indexFile || !fs.existsSync(indexFile)) {
-    console.error('Usage: node phase2_collect_details.js --index "<phase1_index.json>" --out-csv "./result.csv"');
+    console.error('Usage: node phase2_collect_details.js --index "<phase1_index.json>" --out-xlsx "./result.xlsx"');
     process.exit(1);
   }
 
-  const outCsv = path.resolve(args['out-csv'] || path.join(path.dirname(indexFile), 'result.csv'));
   const outSummary = path.resolve(args['out-summary'] || path.join(path.dirname(indexFile), 'summary.json'));
   const outXlsx = path.resolve(args['out-xlsx'] || path.join(path.dirname(indexFile), 'result.xlsx'));
   const outCollision = path.resolve(args['out-collision'] || path.join(path.dirname(indexFile), 'collision_report.json'));
   const outAudit = path.resolve(args['out-audit'] || path.join(path.dirname(indexFile), 'audit_stats.json'));
-  const outManualReview = path.resolve(args['out-manual-review'] || path.join(path.dirname(indexFile), 'manual_review_queue.csv'));
-  const threshold = Number(args.threshold || 10);
+  const outDebugRows = path.resolve(args['out-debug-rows'] || path.join(path.dirname(indexFile), 'debug_rows.json'));
   const snapshotDate = clean(args['snapshot-date'] || '');
   const configFile = args.config ? path.resolve(args.config) : '';
   const config = configFile && fs.existsSync(configFile) ? JSON.parse(fs.readFileSync(configFile, 'utf8')) : {};
+  const checkpointEvery = Math.max(1, Number(args['checkpoint-every'] || config.checkpoint_every || 1));
+  const checkpointEveryCandidate = Math.max(1, Number(args['checkpoint-every-candidate'] || args['checkpoint-every-candidates'] || config.checkpoint_every_candidate || config.checkpoint_every_candidates || 1));
+  const outPartialXlsx = path.resolve(args['out-partial-xlsx'] || path.join(path.dirname(indexFile), 'partial_verified_rows.xlsx'));
+  const outCheckpoint = path.resolve(args['out-checkpoint'] || path.join(path.dirname(indexFile), 'phase2_autosave_state.json'));
+  const outPartialSummary = path.resolve(args['out-partial-summary'] || path.join(path.dirname(indexFile), 'phase2_autosave_summary.json'));
+  const outProgress = path.resolve(args['out-progress'] || path.join(path.dirname(indexFile), 'phase2_progress.json'));
+  const outCheckpointError = path.resolve(args['out-checkpoint-error'] || path.join(path.dirname(indexFile), 'phase2_autosave_last_error.txt'));
+  const threshold = Number(args.threshold || config.threshold || 10);
   const aliasesConfig = config.aliases && typeof config.aliases === 'object' ? config.aliases : {};
   const siblingTitlesConfig = config.sibling_titles && typeof config.sibling_titles === 'object' ? config.sibling_titles : {};
   const ipRootsConfig = config.ip_roots && typeof config.ip_roots === 'object' ? config.ip_roots : {};
@@ -969,15 +1346,19 @@ function resolveCollisions(rows) {
     process.exit(1);
   }
 
+  const allGameNames = gameEntries.map((g) => clean(g.game_name)).filter(Boolean);
   const profiles = new Map();
   for (const g of gameEntries) {
+    const automaticSiblingTitles = allGameNames.filter((name) => name && name !== g.game_name);
+    const configuredSiblings = siblingTitlesConfig[g.game_name] || [];
     profiles.set(
       g.game_name,
       buildGameProfileV3(
         g.game_name,
         aliasesConfig[g.game_name] || [],
-        siblingTitlesConfig[g.game_name] || [],
-        ipRootsConfig[g.game_name] || []
+        unique([...(Array.isArray(configuredSiblings) ? configuredSiblings : []), ...automaticSiblingTitles]),
+        ipRootsConfig[g.game_name] || [],
+        config
       )
     );
   }
@@ -1010,158 +1391,6 @@ function resolveCollisions(rows) {
       output_rows: 0,
       game_breakdown: {},
     };
-
-    for (const g of gameEntries) {
-      const gameName = g.game_name;
-      const profile = profiles.get(gameName);
-      const candidates = JSON.parse(fs.readFileSync(g.candidates_file, 'utf8'));
-
-      const one = { candidates: candidates.length, staged_output: 0 };
-      stats.total_candidates += candidates.length;
-
-      for (let i = 0; i < candidates.length; i++) {
-        const c = candidates[i];
-        const cardMembers = toInt(c.card_group_size);
-        if (!(typeof cardMembers === 'number' && Number.isFinite(cardMembers) && cardMembers >= 100)) {
-          stats.skipped_card_lt_100++;
-          continue;
-        }
-
-        stats.about_attempted++;
-        const aboutCacheKey = clean(c.group_url || '').replace(/\/+$/, '').toLowerCase();
-        let about = aboutCacheKey ? aboutCache.get(aboutCacheKey) : null;
-        if (about) {
-          stats.about_cache_hits++;
-        } else {
-          stats.about_fetches++;
-          about = await fetchAboutWithRetry(page, c.group_url, 2);
-          if (aboutCacheKey) aboutCache.set(aboutCacheKey, about);
-        }
-        if (!about.ok) {
-          stats.about_failed++;
-          continue;
-        }
-
-        const aboutText = about.text;
-        const aboutLanguageText = about.language_text || '';
-        const groupSizeAbout = extractGroupSize(aboutText);
-        const groupSize = groupSizeAbout !== '' ? groupSizeAbout : cardMembers;
-        const todayPosts = extractTodayPosts(aboutText);
-        const weekNewFans = extractWeekNewFans(aboutText);
-        const existed = extractExistedLastMonth(aboutText);
-        const match = matchGame(profile, c.group_name, aboutText, c.snippet);
-        let languageSignal = detectLanguageSignalFromEvidence(c.group_name, aboutLanguageText, '', '');
-        const regionKeywordMatch = detectRegionByGroupName(c.group_name, regionKeywords);
-        let region = mapRegion(languageSignal, languageToRegion, regionKeywordMatch);
-
-        const row = {
-          snapshot_date: snapshotDate || config.snapshot_date || new Date().toISOString().slice(0, 10),
-          region,
-          game_name: gameName,
-          group_name: c.group_name || '',
-          group_url: c.group_url || '',
-          group_id: getGroupId(c.group_url || ''),
-          group_size: groupSize === '' ? '' : String(groupSize),
-          today_posts: todayPosts === '' ? '' : String(todayPosts),
-          week_new_fans: weekNewFans === '' ? '' : String(weekNewFans),
-          existed_last_month: existed,
-          is_relevant: match.matched ? 'yes' : 'no',
-          language_signal: languageSignal,
-          action: '',
-          action_reason: '',
-          risk_level: '',
-          __match_score: match.score,
-          __match_type: match.type,
-          __matched_phrase: match.phrase || '',
-          __negative_hit: match.negative_hit || '',
-          __review_reason: match.review_reason || '',
-          __region_source: regionKeywordMatch.source || (region ? 'language_map' : ''),
-          __region_keyword_hits: (regionKeywordMatch.keyword_hits || []).map((x) => `${x.region}:${x.keyword}`).join('|'),
-        };
-
-        if (match.manual_review) {
-          manualReviewRows.push({
-            snapshot_date: row.snapshot_date,
-            game_name: row.game_name,
-            group_name: row.group_name,
-            group_url: row.group_url,
-            language_signal: row.language_signal,
-            region: row.region,
-            match_type: match.type,
-            matched_phrase: match.phrase || '',
-            negative_hit: match.negative_hit || '',
-            review_reason: match.review_reason || '',
-          });
-        }
-
-        if (row.is_relevant !== 'yes') {
-          stats.dropped_not_relevant++;
-          continue;
-        }
-
-        const postsNum = toInt(row.today_posts);
-        const fansNum = toInt(row.week_new_fans);
-        const passPosts = typeof postsNum === 'number' && Number.isFinite(postsNum) && postsNum >= threshold;
-        const passFans = typeof fansNum === 'number' && Number.isFinite(fansNum) && fansNum >= threshold;
-        if (!passPosts && !passFans) {
-          stats.dropped_threshold++;
-          continue;
-        }
-
-        const sizeNum = toInt(row.group_size);
-        if (!(typeof sizeNum === 'number' && Number.isFinite(sizeNum) && sizeNum >= 100)) continue;
-
-        stats.discussion_language_attempted++;
-        let discussionLanguage = aboutCacheKey ? discussionLanguageCache.get(aboutCacheKey) : null;
-        if (discussionLanguage) {
-          stats.discussion_language_cache_hits++;
-        } else {
-          stats.discussion_language_fetches++;
-          discussionLanguage = await fetchDiscussionLanguageSample(page, c.group_url);
-          if (aboutCacheKey) discussionLanguageCache.set(aboutCacheKey, discussionLanguage);
-        }
-        if (!discussionLanguage.ok) {
-          stats.discussion_language_failed++;
-        }
-        languageSignal = detectLanguageSignalFromEvidence(
-          c.group_name,
-          aboutLanguageText,
-          discussionLanguage.ok ? discussionLanguage.text : '',
-          ''
-        );
-        region = mapRegion(languageSignal, languageToRegion, regionKeywordMatch);
-        row.language_signal = languageSignal;
-        row.region = region;
-        row.__region_source = regionKeywordMatch.source || (region ? 'language_map' : '');
-
-        if (allowedLanguageSignals && allowedLanguageSignals.size && !allowedLanguageSignals.has(row.language_signal)) {
-          stats.dropped_lang_region++;
-          continue;
-        }
-
-        if (allowedRegions && allowedRegions.size && !allowedRegions.has(row.region)) {
-          stats.dropped_lang_region++;
-          continue;
-        }
-
-        row.action = actionFromExisted(row.existed_last_month);
-        row.action_reason = actionReason(row.today_posts, row.week_new_fans, row.existed_last_month, threshold);
-        row.risk_level = riskLevel(row);
-        stagedRows.push(row);
-        one.staged_output++;
-
-        if ((i + 1) % 20 === 0 || i === candidates.length - 1) {
-          console.log(JSON.stringify({ game: gameName, processed: i + 1, total: candidates.length, staged_output: one.staged_output }));
-        }
-      }
-
-      stats.game_breakdown[gameName] = one;
-    }
-
-    const resolved = resolveCollisions(stagedRows);
-    stats.dropped_collision = resolved.droppedCollision;
-    stats.manual_review_rows = manualReviewRows.length;
-
     const formulaFields = {
       activeIndex: '活跃指数=当日新帖/社群规模',
       growthRate: '规模增速=上周新增/(社群规模-上周新增）',
@@ -1188,10 +1417,339 @@ function resolveCollisions(rows) {
       '__region_source',
       '__region_keyword_hits',
     ];
+    let currentGameName = '';
+    let currentGameIndex = -1;
+    let currentCandidateIndex = -1;
+    let currentCandidateTotal = 0;
+    let totalProcessedCandidates = 0;
+    let lastCandidateStatus = '';
+    let lastCheckpointAt = '';
+    let currentGameBreakdown = null;
 
+    const makePartialRows = () => {
+      const outputSnapshotDate = normalizeSnapshotDate(snapshotDate || config.snapshot_date, new Date().toISOString().slice(0, 10));
+      return stagedRows.map((row) => ({
+        ...row,
+        snapshot_date: outputSnapshotDate,
+        group_id: String(row.group_id || ''),
+        language: row.language_signal || '',
+        [formulaFields.activeIndex]: '',
+        [formulaFields.growthRate]: '',
+      }));
+    };
+
+    const writePartialCheckpoint = (meta = {}, options = {}) => {
+      const now = new Date().toISOString();
+      lastCheckpointAt = now;
+      const shouldWriteXlsx = Boolean(options.writeXlsx);
+      const shouldWriteFullState = Boolean(options.writeFullState || shouldWriteXlsx);
+      const partialRows = shouldWriteXlsx ? makePartialRows() : [];
+      const progress = {
+        current_game_name: currentGameName,
+        current_game_index: currentGameIndex,
+        total_games: gameEntries.length,
+        current_candidate_index: currentCandidateIndex,
+        current_candidate_total: currentCandidateTotal,
+        total_processed_candidates: totalProcessedCandidates,
+        staged_rows: stagedRows.length,
+        manual_review_rows: manualReviewRows.length,
+        last_candidate_status: lastCandidateStatus,
+        last_checkpoint_at: lastCheckpointAt,
+        current_game_breakdown: currentGameBreakdown,
+        autosave_mode: 'progress_json_every_candidate_xlsx_on_accepted_row',
+        partial_xlsx_rows_saved: stagedRows.length,
+        ...meta,
+      };
+
+      // Tiny progress file: written for every candidate. This is the file to watch during long phase-2 runs.
+      writeJsonAtomic(outProgress, {
+        checkpoint_kind: 'facebook_group_monitor_phase2_progress',
+        checkpoint_version: 3,
+        updated_at: now,
+        index_file: indexFile,
+        run_dir: path.dirname(indexFile),
+        progress,
+        outputs: {
+          progress: outProgress,
+          partial_xlsx: outPartialXlsx,
+          recoverable_state: outCheckpoint,
+          final_xlsx: outXlsx,
+          summary: outSummary,
+          collision: outCollision,
+          audit: outAudit,
+          debug_rows: outDebugRows,
+        },
+      });
+
+      // Compatibility summary: also small enough to refresh every candidate.
+      writeJsonAtomic(outPartialSummary, {
+        partial: true,
+        updated_at: now,
+        progress,
+        summary: buildSummary(stagedRows),
+        stats,
+      });
+
+      // Full recovery state is much larger because it contains accepted rows and manual-review rows.
+      // Write it only at accepted-row / game-boundary / emergency checkpoints, not for every rejected candidate.
+      if (shouldWriteFullState) {
+        const checkpoint = {
+          checkpoint_version: 3,
+          checkpoint_kind: 'facebook_group_monitor_phase2_autosave',
+          autosave_mode: 'progress_json_every_candidate_xlsx_on_accepted_row',
+          finalized: false,
+          updated_at: now,
+          index_file: indexFile,
+          run_dir: path.dirname(indexFile),
+          outputs: {
+            progress: outProgress,
+            partial_xlsx: outPartialXlsx,
+            final_xlsx: outXlsx,
+            summary: outSummary,
+            collision: outCollision,
+            audit: outAudit,
+            debug_rows: outDebugRows,
+          },
+          progress,
+          stats,
+          staged_rows: stagedRows,
+          manual_review_rows: manualReviewRows,
+        };
+        writeJsonAtomic(outCheckpoint, checkpoint);
+      }
+
+      if (shouldWriteXlsx) {
+        try {
+          // The workbook is saved immediately when a row passes all filters. Rejected candidates only touch JSON.
+          writePlainXlsx(outPartialXlsx, partialRows, fields);
+        } catch (err) {
+          // If the workbook is open in Excel, keep JSON autosave intact and record the workbook write failure.
+          atomicWriteText(outCheckpointError, `[${now}] failed to write ${outPartialXlsx}\n${err && err.stack ? err.stack : err}\n`, 'utf8');
+        }
+      }
+    };
+
+    emergencyFlush = (reason) => {
+      writePartialCheckpoint({ stage: 'emergency_flush', reason }, { writeXlsx: true, writeFullState: true });
+    };
+
+    // Create the partial workbook immediately with headers, then keep it updated only when accepted rows appear.
+    writePartialCheckpoint({ stage: 'phase2_started' }, { writeXlsx: true, writeFullState: true });
+
+    for (let gameIdx = 0; gameIdx < gameEntries.length; gameIdx++) {
+      const g = gameEntries[gameIdx];
+      const gameName = g.game_name;
+      currentGameName = gameName;
+      currentGameIndex = gameIdx + 1;
+      const profile = profiles.get(gameName);
+      const candidates = JSON.parse(fs.readFileSync(g.candidates_file, 'utf8'));
+      currentCandidateTotal = candidates.length;
+      currentCandidateIndex = 0;
+
+      const one = { candidates: candidates.length, staged_output: 0, processed: 0 };
+      currentGameBreakdown = one;
+      stats.total_candidates += candidates.length;
+      writePartialCheckpoint({ stage: 'game_started' }, { writeFullState: true });
+
+      for (let i = 0; i < candidates.length; i++) {
+        const c = candidates[i];
+        currentCandidateIndex = i + 1;
+        let candidateCheckpointWritten = false;
+        const markCandidateCheckpoint = (status, extra = {}) => {
+          if (!candidateCheckpointWritten) {
+            totalProcessedCandidates++;
+            one.processed++;
+            candidateCheckpointWritten = true;
+          }
+          lastCandidateStatus = status;
+          if (totalProcessedCandidates % checkpointEveryCandidate === 0 || status === 'accepted') {
+            writePartialCheckpoint({
+              stage: 'candidate_processed',
+              status,
+              current_group_url: c.group_url || '',
+              current_group_name: c.group_name || '',
+              ...extra,
+            }, {
+              writeXlsx: status === 'accepted',
+              writeFullState: status === 'accepted',
+            });
+          }
+        };
+        const cardMembers = toInt(c.card_group_size);
+        if (!(typeof cardMembers === 'number' && Number.isFinite(cardMembers) && cardMembers >= 100)) {
+          stats.skipped_card_lt_100++;
+          markCandidateCheckpoint('skipped_card_lt_100');
+          continue;
+        }
+
+        stats.about_attempted++;
+        const aboutCacheKey = clean(c.group_url || '').replace(/\/+$/, '').toLowerCase();
+        let about = aboutCacheKey ? aboutCache.get(aboutCacheKey) : null;
+        if (about) {
+          stats.about_cache_hits++;
+        } else {
+          stats.about_fetches++;
+          about = await fetchAboutWithRetry(page, c.group_url, 2);
+          if (aboutCacheKey) aboutCache.set(aboutCacheKey, about);
+        }
+        if (!about.ok) {
+          stats.about_failed++;
+          markCandidateCheckpoint('about_failed', { about_reason: about.reason || '' });
+          continue;
+        }
+
+        const aboutText = about.text;
+        const aboutLanguageText = about.language_text || '';
+        const candidateGroupName = clean(c.group_name || about.group_name || '');
+        const groupSizeAbout = extractGroupSize(aboutText);
+        const groupSize = groupSizeAbout !== '' ? groupSizeAbout : cardMembers;
+        const todayPosts = extractTodayPosts(aboutText);
+        const weekNewFans = extractWeekNewFans(aboutText);
+        const existed = extractExistedLastMonth(aboutText);
+        const match = matchGame(profile, candidateGroupName, aboutText, c.snippet);
+        const thresholdSpec = thresholdSpecForMatch(match, threshold);
+        let languageSignal = detectLanguageSignalFromEvidence(candidateGroupName, aboutLanguageText, '', '');
+        const regionKeywordMatch = detectRegionByGroupName(candidateGroupName, regionKeywords);
+        let region = mapRegion(languageSignal, languageToRegion, regionKeywordMatch);
+
+        const row = {
+          snapshot_date: normalizeSnapshotDate(snapshotDate || config.snapshot_date, new Date().toISOString().slice(0, 10)),
+          region,
+          game_name: gameName,
+          group_name: candidateGroupName,
+          group_url: c.group_url || '',
+          group_id: getGroupId(c.group_url || ''),
+          group_size: groupSize === '' ? '' : String(groupSize),
+          today_posts: todayPosts === '' ? '' : String(todayPosts),
+          week_new_fans: weekNewFans === '' ? '' : String(weekNewFans),
+          existed_last_month: existed,
+          is_relevant: match.matched ? 'yes' : 'no',
+          language_signal: languageSignal,
+          action: '',
+          action_reason: '',
+          risk_level: '',
+          __match_score: match.score,
+          __match_type: match.type,
+          __matched_phrase: match.phrase || '',
+          __negative_hit: match.negative_hit || '',
+          __review_reason: match.review_reason || '',
+          __source_query: c.source_query || (Array.isArray(c.source_queries) ? c.source_queries.join('|') : ''),
+          __source_queries: Array.isArray(c.source_queries) ? c.source_queries.join('|') : (c.source_query || ''),
+          __query_variant_type: c.query_variant_type || (Array.isArray(c.query_variant_types) ? c.query_variant_types.join('|') : ''),
+          __query_variant_types: Array.isArray(c.query_variant_types) ? c.query_variant_types.join('|') : (c.query_variant_type || ''),
+          __source_is_seed_url: c.source_is_seed_url ? 'yes' : 'no',
+          __variant_threshold_applied: `${thresholdSpec.source}:group_size>=${thresholdSpec.group_size};today_posts>=${thresholdSpec.today_posts};week_new_fans>=${thresholdSpec.week_new_fans}`,
+          __region_source: regionKeywordMatch.source || (region ? 'language_map' : ''),
+          __region_keyword_hits: (regionKeywordMatch.keyword_hits || []).map((x) => `${x.region}:${x.keyword}`).join('|'),
+        };
+
+        if (match.manual_review) {
+          manualReviewRows.push({
+            snapshot_date: row.snapshot_date,
+            game_name: row.game_name,
+            group_name: row.group_name,
+            group_url: row.group_url,
+            language_signal: row.language_signal,
+            region: row.region,
+            match_type: match.type,
+            matched_phrase: match.phrase || '',
+            negative_hit: match.negative_hit || '',
+            review_reason: match.review_reason || '',
+            source_query: row.__source_query,
+            query_variant_type: row.__query_variant_type,
+            source_is_seed_url: row.__source_is_seed_url,
+            variant_threshold_applied: row.__variant_threshold_applied,
+          });
+        }
+
+        if (row.is_relevant !== 'yes') {
+          stats.dropped_not_relevant++;
+          markCandidateCheckpoint('dropped_not_relevant', { match_type: match.type || '', match_score: match.score || 0 });
+          continue;
+        }
+
+        const postsNum = toInt(row.today_posts);
+        const fansNum = toInt(row.week_new_fans);
+        const sizeNum = toInt(row.group_size);
+        if (!(typeof sizeNum === 'number' && Number.isFinite(sizeNum) && sizeNum >= thresholdSpec.group_size)) {
+          stats.dropped_threshold++;
+          markCandidateCheckpoint('dropped_threshold_group_size');
+          continue;
+        }
+        const passPosts = typeof postsNum === 'number' && Number.isFinite(postsNum) && postsNum >= thresholdSpec.today_posts;
+        const passFans = typeof fansNum === 'number' && Number.isFinite(fansNum) && fansNum >= thresholdSpec.week_new_fans;
+        if (!passPosts && !passFans) {
+          stats.dropped_threshold++;
+          markCandidateCheckpoint('dropped_threshold_activity');
+          continue;
+        }
+
+        stats.discussion_language_attempted++;
+        let discussionLanguage = aboutCacheKey ? discussionLanguageCache.get(aboutCacheKey) : null;
+        if (discussionLanguage) {
+          stats.discussion_language_cache_hits++;
+        } else {
+          stats.discussion_language_fetches++;
+          discussionLanguage = await fetchDiscussionLanguageSample(page, c.group_url);
+          if (aboutCacheKey) discussionLanguageCache.set(aboutCacheKey, discussionLanguage);
+        }
+        if (!discussionLanguage.ok) {
+          stats.discussion_language_failed++;
+        }
+        languageSignal = detectLanguageSignalFromEvidence(
+          candidateGroupName,
+          aboutLanguageText,
+          discussionLanguage.ok ? discussionLanguage.text : '',
+          ''
+        );
+        region = mapRegion(languageSignal, languageToRegion, regionKeywordMatch);
+        row.language_signal = languageSignal;
+        row.region = region;
+        row.__region_source = regionKeywordMatch.source || (region ? 'language_map' : '');
+
+        if (allowedLanguageSignals && allowedLanguageSignals.size && !allowedLanguageSignals.has(row.language_signal)) {
+          stats.dropped_lang_region++;
+          markCandidateCheckpoint('dropped_language_filter', { language_signal: row.language_signal || '' });
+          continue;
+        }
+
+        if (allowedRegions && allowedRegions.size && !allowedRegions.has(row.region)) {
+          stats.dropped_lang_region++;
+          markCandidateCheckpoint('dropped_region_filter', { region: row.region || '' });
+          continue;
+        }
+
+        row.action = actionFromExisted(row.existed_last_month);
+        row.action_reason = actionReason(row.today_posts, row.week_new_fans, row.existed_last_month, thresholdSpec);
+        row.risk_level = riskLevel(row);
+        stagedRows.push(row);
+        one.staged_output++;
+        markCandidateCheckpoint('accepted', { staged_output: one.staged_output });
+        if (checkpointEvery > 1 && stagedRows.length % checkpointEvery === 0) {
+          writePartialCheckpoint({ stage: 'accepted_row_checkpoint' }, { writeFullState: true });
+        }
+
+        if ((i + 1) % 20 === 0 || i === candidates.length - 1) {
+          console.log(JSON.stringify({ game: gameName, processed: i + 1, total: candidates.length, staged_output: one.staged_output }));
+        }
+      }
+
+      stats.game_breakdown[gameName] = one;
+      writePartialCheckpoint({ stage: 'game_finished' }, { writeFullState: true });
+    }
+
+    const resolved = resolveCollisions(stagedRows);
+    writePartialCheckpoint({ stage: 'before_final_write' }, { writeFullState: true });
+    stats.dropped_collision = resolved.droppedCollision;
+    stats.manual_review_rows = manualReviewRows.length;
+
+    const outputSnapshotDate = normalizeSnapshotDate(snapshotDate || config.snapshot_date, new Date().toISOString().slice(0, 10));
+    const debugRows = resolved.rows.map((row) => ({ ...row, snapshot_date: outputSnapshotDate }));
     const finalRows = resolved.rows.map((row, idx) => {
       const out = { ...row };
       const excelRow = idx + 2;
+      out.snapshot_date = outputSnapshotDate;
+      out.group_id = String(row.group_id || '');
       out.language = row.language_signal || '';
       out[formulaFields.activeIndex] = `=IFERROR(I${excelRow}/H${excelRow},"")`;
       out[formulaFields.growthRate] = `=IFERROR(J${excelRow}/(H${excelRow}-J${excelRow}),"")`;
@@ -1205,11 +1763,12 @@ function resolveCollisions(rows) {
 
     stats.output_rows = finalRows.length;
 
-    fs.mkdirSync(path.dirname(outCsv), { recursive: true });
-    fs.writeFileSync(outCsv, toCsv(finalRows, fields), 'utf8');
-    fs.writeFileSync(
-      outManualReview,
-      toCsv(manualReviewRows, [
+    const wb = XLSX.utils.book_new();
+    const ws = buildDetailSheet(finalRows, fields, formulaFields);
+    XLSX.utils.book_append_sheet(wb, ws, 'detail');
+    XLSX.utils.book_append_sheet(
+      wb,
+      buildPlainSheet(manualReviewRows, [
         'snapshot_date',
         'game_name',
         'group_name',
@@ -1220,32 +1779,56 @@ function resolveCollisions(rows) {
         'matched_phrase',
         'negative_hit',
         'review_reason',
+        'source_query',
+        'query_variant_type',
+        'source_is_seed_url',
+        'variant_threshold_applied',
       ]),
-      'utf8'
+      'manual_review'
     );
-
-    const wb = XLSX.utils.book_new();
-    const ws = buildDetailSheet(finalRows, fields, formulaFields);
-    XLSX.utils.book_append_sheet(wb, ws, 'detail');
-    XLSX.writeFile(wb, outXlsx);
+    writeWorkbookAtomic(outXlsx, wb);
 
     const summary = buildSummary(finalRows);
-    fs.writeFileSync(outSummary, JSON.stringify({ summary, stats }, null, 2), 'utf8');
-    fs.writeFileSync(outCollision, JSON.stringify(resolved.report, null, 2), 'utf8');
-    fs.writeFileSync(outAudit, JSON.stringify(stats, null, 2), 'utf8');
+    stats.output_rows = finalRows.length;
+    const finalCheckpoint = fs.existsSync(outCheckpoint) ? JSON.parse(fs.readFileSync(outCheckpoint, 'utf8')) : {};
+    finalCheckpoint.finalized = true;
+    finalCheckpoint.finalized_at = new Date().toISOString();
+    finalCheckpoint.summary = summary;
+    finalCheckpoint.progress = {
+      ...(finalCheckpoint.progress || {}),
+      stage: 'finalized',
+      output_rows: finalRows.length,
+      dropped_collision: resolved.droppedCollision,
+    };
+    writeJsonAtomic(outCheckpoint, finalCheckpoint);
+    writeJsonAtomic(outProgress, {
+      checkpoint_kind: 'facebook_group_monitor_phase2_progress',
+      checkpoint_version: 3,
+      finalized: true,
+      finalized_at: finalCheckpoint.finalized_at,
+      index_file: indexFile,
+      run_dir: path.dirname(indexFile),
+      progress: finalCheckpoint.progress,
+      summary,
+      stats,
+    });
+    writeJsonAtomic(outSummary, { summary, stats });
+    writeJsonAtomic(outCollision, resolved.report);
+    writeJsonAtomic(outAudit, stats);
+    writeJsonAtomic(outDebugRows, debugRows);
 
     console.log(JSON.stringify({
       ok: true,
-      out_csv: outCsv,
       out_xlsx: outXlsx,
       out_summary: outSummary,
       out_collision: outCollision,
       out_audit: outAudit,
-      out_manual_review: outManualReview,
+      out_debug_rows: outDebugRows,
       summary,
       stats,
     }, null, 2));
   } finally {
+    emergencyFlush = null;
     await browser.close();
   }
 })();

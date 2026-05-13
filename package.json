@@ -1,7 +1,7 @@
 {
-  "name": "fb-group-monitor-skill-v3-5",
-  "version": "3.5.0",
-  "description": "Reusable Codex skill for two-stage Facebook game group monitoring",
+  "name": "fb-group-monitor-skill-v3-6-3",
+  "version": "3.6.3",
+  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with progress JSON and accepted-row xlsx autosave",
   "private": true,
   "scripts": {
     "login": "powershell -ExecutionPolicy Bypass -File .\\scripts\\open_chrome_9222.ps1",

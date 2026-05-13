@@ -23,6 +23,47 @@ function parseArgs(argv) {
   return out;
 }
 
+function stripDiacritics(s) {
+  return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizeWords(s) {
+  return stripDiacritics(clean(s))
+    .normalize('NFKC')
+    .replace(/[:：]+/g, ' ')
+    .replace(/[×✕✖]/g, ' x ')
+    .replace(/[^\p{Letter}\p{Number}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeCompact(s) {
+  return normalizeWords(s).toLowerCase().replace(/\s+/g, '');
+}
+
+function titleCaseLoose(s) {
+  return clean(s)
+    .split(/\s+/)
+    .map((tk) => {
+      if (/^[A-Z0-9]+$/.test(tk)) return tk;
+      if (tk.length <= 1) return tk.toUpperCase();
+      return tk.slice(0, 1).toUpperCase() + tk.slice(1);
+    })
+    .join(' ');
+}
+
+function uniqueObjectsByKey(list, keyFn) {
+  const out = [];
+  const seen = new Set();
+  for (const item of list) {
+    const key = keyFn(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
 function slugify(s) {
   const base = clean(s)
     .normalize('NFKC')
@@ -61,9 +102,105 @@ function meaningfulTokens(text) {
     .filter((s) => s.length >= 3 && !stop.has(s));
 }
 
-async function collectRound(page, gameName) {
-  const queryTokens = meaningfulTokens(gameName);
-  return page.evaluate((queryTokens) => {
+function loadConfig(configFile) {
+  if (!configFile) return {};
+  const p = path.resolve(configFile);
+  if (!fs.existsSync(p)) return {};
+  return JSON.parse(fs.readFileSync(p, 'utf8'));
+}
+
+function getTitleOverride(config, gameName) {
+  const overrides = config.title_variant_overrides && typeof config.title_variant_overrides === 'object'
+    ? config.title_variant_overrides
+    : {};
+  return overrides[gameName] || {};
+}
+
+function buildAutomaticSearchVariants(gameName) {
+  const raw = clean(gameName);
+  const normalized = normalizeWords(raw);
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const variants = [
+    { query: raw, type: 'canonical' },
+  ];
+
+  if (normalized && normalized !== raw) variants.push({ query: normalized, type: 'punctuation_normalized' });
+
+  if (tokens.length >= 2) {
+    // Merge one adjacent token pair at a time: "All Star Tower Defense" -> "Allstar Tower Defense", "All Star TowerDefense".
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const merged = tokens.map((tk, idx) => (idx === i ? `${tk}${tokens[i + 1]}` : (idx === i + 1 ? '' : tk))).filter(Boolean).join(' ');
+      if (merged) variants.push({ query: titleCaseLoose(merged), type: 'compact_spacing' });
+    }
+
+    // Merge common word-pairs: "Allstar TowerDefense". This is still a controlled spacing variant, not a broad keyword expansion.
+    if (tokens.length >= 4) {
+      const pairMerged = [];
+      for (let i = 0; i < tokens.length; i += 2) {
+        if (i + 1 < tokens.length) pairMerged.push(`${tokens[i]}${tokens[i + 1]}`);
+        else pairMerged.push(tokens[i]);
+      }
+      variants.push({ query: titleCaseLoose(pairMerged.join(' ')), type: 'compact_spacing' });
+    }
+  }
+
+  return uniqueObjectsByKey(variants, (v) => normalizeWords(v.query).toLowerCase());
+}
+
+function buildSearchPlan(gameName, config) {
+  const plan = buildAutomaticSearchVariants(gameName);
+  const override = getTitleOverride(config, gameName);
+  const explicitVariants = Array.isArray(override.search_variants) ? override.search_variants : [];
+  for (const item of explicitVariants) {
+    if (typeof item === 'string') {
+      plan.push({ query: clean(item), type: 'configured_variant' });
+      continue;
+    }
+    if (item && typeof item === 'object' && clean(item.query)) {
+      plan.push({
+        query: clean(item.query),
+        type: clean(item.type) || 'configured_variant',
+        threshold: item,
+      });
+    }
+  }
+  return uniqueObjectsByKey(plan, (v) => `${v.type}::${normalizeWords(v.query).toLowerCase()}`);
+}
+
+async function gotoWithRetry(page, url, attempts = 3) {
+  let lastError;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      await page.waitForTimeout(2500 + i * 1500);
+    }
+  }
+  throw lastError;
+}
+
+function buildSeedCandidates(gameName, config) {
+  const override = getTitleOverride(config, gameName);
+  const urls = Array.isArray(override.seed_group_urls) ? override.seed_group_urls : [];
+  return urls.map((url) => ({
+    group_name: '',
+    group_url: clean(url).split('?')[0].replace(/\/+$/, ''),
+    snippet: '',
+    card_group_size: 100,
+    source_game_name: gameName,
+    source_query: '[seed_group_url]',
+    query_variant_type: 'seed_group_url',
+    source_is_seed_url: true,
+    source_queries: ['[seed_group_url]'],
+    query_variant_types: ['seed_group_url'],
+  })).filter((x) => x.group_url);
+}
+
+async function collectRound(page, gameName, sourceQuery, variantType) {
+  const queryTokens = Array.from(new Set([...meaningfulTokens(gameName), ...meaningfulTokens(sourceQuery)]));
+  return page.evaluate(({ queryTokens, sourceQuery, variantType, gameName }) => {
     const main = document.querySelector('div[role="main"]') || document.body;
     const out = [];
     const anchors = Array.from(main.querySelectorAll('a[href*="/groups/"]'));
@@ -84,12 +221,18 @@ async function collectRound(page, gameName) {
       if (!looksLikeGroupCard) continue;
       out.push({
         group_name: groupName,
-        group_url: href.split('?')[0],
+        group_url: href.split('?')[0].replace(/\/+$/, ''),
         snippet,
+        source_game_name: gameName,
+        source_query: sourceQuery,
+        query_variant_type: variantType,
+        source_is_seed_url: false,
+        source_queries: [sourceQuery],
+        query_variant_types: [variantType],
       });
     }
     return out;
-  }, queryTokens);
+  }, { queryTokens, sourceQuery, variantType, gameName });
 }
 
 async function hasNoMoreResultsSignal(page) {
@@ -99,9 +242,28 @@ async function hasNoMoreResultsSignal(page) {
   });
 }
 
-async function runOneGame(page, gameName, maxMinutes) {
-  const searchUrl = `https://www.facebook.com/search/groups/?q=${encodeURIComponent(gameName)}`;
-  await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+function mergeCandidate(existing, incoming) {
+  const sourceQueries = Array.from(new Set([...(existing.source_queries || []), ...(incoming.source_queries || []), incoming.source_query].filter(Boolean)));
+  const variantTypes = Array.from(new Set([...(existing.query_variant_types || []), ...(incoming.query_variant_types || []), incoming.query_variant_type].filter(Boolean)));
+  const cardA = parseMemberCount(existing.snippet);
+  const cardB = parseMemberCount(incoming.snippet);
+  const betterIncomingSnippet = (cardB && !cardA) || ((incoming.snippet || '').length > (existing.snippet || '').length && !existing.source_is_seed_url);
+  return {
+    ...existing,
+    group_name: clean(existing.group_name) || clean(incoming.group_name),
+    snippet: betterIncomingSnippet ? incoming.snippet : existing.snippet,
+    card_group_size: cardB || existing.card_group_size || '',
+    source_query: existing.source_query || incoming.source_query,
+    query_variant_type: existing.query_variant_type || incoming.query_variant_type,
+    source_is_seed_url: Boolean(existing.source_is_seed_url || incoming.source_is_seed_url),
+    source_queries: sourceQueries,
+    query_variant_types: variantTypes,
+  };
+}
+
+async function runOneSearchQuery(page, gameName, variant, maxMinutes) {
+  const searchUrl = `https://www.facebook.com/search/groups/?q=${encodeURIComponent(variant.query)}`;
+  await gotoWithRetry(page, searchUrl);
   await page.waitForTimeout(4500);
 
   const startedAt = Date.now();
@@ -117,21 +279,22 @@ async function runOneGame(page, gameName, maxMinutes) {
     rounds++;
     let got = [];
     try {
-      got = await collectRound(page, gameName);
+      got = await collectRound(page, gameName, variant.query, variant.type);
     } catch (_e) {
-      await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+      await gotoWithRetry(page, searchUrl);
       await page.waitForTimeout(3000);
-      got = await collectRound(page, gameName);
+      got = await collectRound(page, gameName, variant.query, variant.type);
     }
 
     let newGroups = 0;
     for (const g of got) {
-      if (!map.has(g.group_url)) {
-        map.set(g.group_url, {
-          ...g,
-          card_group_size: parseMemberCount(g.snippet),
-        });
+      const key = g.group_url;
+      const withSize = { ...g, card_group_size: parseMemberCount(g.snippet) };
+      if (!map.has(key)) {
+        map.set(key, withSize);
         newGroups++;
+      } else {
+        map.set(key, mergeCandidate(map.get(key), withSize));
       }
     }
 
@@ -145,6 +308,8 @@ async function runOneGame(page, gameName, maxMinutes) {
     const noMore = await hasNoMoreResultsSignal(page);
     const elapsed = Date.now() - startedAt;
     stats.push({
+      query: variant.query,
+      query_variant_type: variant.type,
       round: rounds,
       new_groups: newGroups,
       total_unique: map.size,
@@ -154,7 +319,7 @@ async function runOneGame(page, gameName, maxMinutes) {
       elapsed_sec: Math.floor(elapsed / 1000),
     });
 
-    console.log(JSON.stringify({ game: gameName, round: rounds, new_groups: newGroups, total_unique: map.size }));
+    console.log(JSON.stringify({ game: gameName, query: variant.query, variant_type: variant.type, round: rounds, new_groups: newGroups, total_unique: map.size }));
 
     if (noMore) {
       stopReason = 'NO_MORE_RESULTS_SIGNAL';
@@ -178,11 +343,52 @@ async function runOneGame(page, gameName, maxMinutes) {
   }
 
   return {
-    game_name: gameName,
+    query: variant.query,
+    query_variant_type: variant.type,
     stop_reason: stopReason,
     rounds,
     candidates: Array.from(map.values()),
     stats,
+  };
+}
+
+async function runOneGame(page, gameName, maxMinutes, config) {
+  const searchPlan = buildSearchPlan(gameName, config);
+  const map = new Map();
+  const allStats = [];
+  const queryRuns = [];
+
+  const perVariantMaxMinutes = Math.max(8, Math.ceil(maxMinutes / Math.max(searchPlan.length, 1)));
+  for (const variant of searchPlan) {
+    const one = await runOneSearchQuery(page, gameName, variant, perVariantMaxMinutes);
+    queryRuns.push({
+      query: one.query,
+      query_variant_type: one.query_variant_type,
+      stop_reason: one.stop_reason,
+      rounds: one.rounds,
+      candidates_count: one.candidates.length,
+    });
+    allStats.push(...one.stats);
+    for (const c of one.candidates) {
+      if (!map.has(c.group_url)) map.set(c.group_url, c);
+      else map.set(c.group_url, mergeCandidate(map.get(c.group_url), c));
+    }
+  }
+
+  for (const seed of buildSeedCandidates(gameName, config)) {
+    if (!map.has(seed.group_url)) map.set(seed.group_url, seed);
+    else map.set(seed.group_url, mergeCandidate(map.get(seed.group_url), seed));
+  }
+
+  return {
+    game_name: gameName,
+    stop_reason: queryRuns.map((x) => `${x.query_variant_type}:${x.stop_reason}`).join('|'),
+    rounds: queryRuns.reduce((sum, x) => sum + (x.rounds || 0), 0),
+    search_plan: searchPlan,
+    per_variant_max_minutes: perVariantMaxMinutes,
+    query_runs: queryRuns,
+    candidates: Array.from(map.values()),
+    stats: allStats,
   };
 }
 
@@ -195,15 +401,16 @@ async function runOneGame(page, gameName, maxMinutes) {
     .filter(Boolean);
 
   if (!games.length) {
-    console.error('Usage: node phase1_collect_candidates.js --games "LINE Rangers,sealm on cross" --out-dir "./runs/xxx"');
+    console.error('Usage: node phase1_collect_candidates.js --games "LINE Rangers,sealm on cross" --out-dir "./runs/xxx" --config "./task_config.json"');
     process.exit(1);
   }
 
   const outDir = path.resolve(args['out-dir'] || `./runs/${Date.now()}`);
   const maxMinutes = Number(args['max-minutes'] || 90);
+  const config = loadConfig(args.config || '');
   fs.mkdirSync(outDir, { recursive: true });
 
-  const browser = await chromium.connectOverCDP(args.cdp || 'http://127.0.0.1:9222');
+  const browser = await chromium.connectOverCDP(args.cdp || config.cdp_url || 'http://127.0.0.1:9222');
   const context = browser.contexts()[0] || (await browser.newContext());
   const page = context.pages().find((p) => p.url().includes('facebook.com')) || (await context.newPage());
 
@@ -213,16 +420,21 @@ async function runOneGame(page, gameName, maxMinutes) {
       mode: 'phase1',
       games: [],
       out_dir: outDir,
+      config_file: args.config ? path.resolve(args.config) : '',
+      variant_policy: {
+        automatic: ['canonical', 'punctuation_normalized', 'compact_spacing'],
+        configured_only: ['connector_x', 'configured_variant', 'seed_group_url'],
+      },
     };
 
     for (const gameName of games) {
-      const one = await runOneGame(page, gameName, maxMinutes);
+      const one = await runOneGame(page, gameName, maxMinutes, config);
       const slug = slugify(gameName);
       const candidatesFile = path.join(outDir, `phase1_${slug}_candidates.json`);
       const statsFile = path.join(outDir, `phase1_${slug}_stats.json`);
 
       fs.writeFileSync(candidatesFile, JSON.stringify(one.candidates, null, 2), 'utf8');
-      fs.writeFileSync(statsFile, JSON.stringify(one.stats, null, 2), 'utf8');
+      fs.writeFileSync(statsFile, JSON.stringify({ stats: one.stats, query_runs: one.query_runs, search_plan: one.search_plan, per_variant_max_minutes: one.per_variant_max_minutes }, null, 2), 'utf8');
 
       index.games.push({
         game_name: gameName,
@@ -232,6 +444,9 @@ async function runOneGame(page, gameName, maxMinutes) {
         candidates_count: one.candidates.length,
         candidates_file: candidatesFile,
         stats_file: statsFile,
+        search_plan: one.search_plan,
+        per_variant_max_minutes: one.per_variant_max_minutes,
+        query_runs: one.query_runs,
       });
     }
 
