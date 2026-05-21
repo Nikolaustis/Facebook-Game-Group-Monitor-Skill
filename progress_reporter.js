@@ -1,0 +1,189 @@
+{
+  "games": [
+    "LINE Rangers",
+    "sealm on cross"
+  ],
+  "aliases": {
+    "LINE Rangers": [],
+    "sealm on cross": []
+  },
+  "sibling_titles": {
+    "LINE Rangers": [],
+    "sealm on cross": []
+  },
+  "ip_roots": {
+    "LINE Rangers": [
+      "LINE"
+    ],
+    "sealm on cross": [
+      "sealm"
+    ]
+  },
+  "threshold": 10,
+  "progress_report_every_minutes": 30,
+  "allowed_language_signals": [],
+  "allowed_regions": [],
+  "language_to_region": {
+    "Thai": "TH",
+    "Vietnamese": "VN",
+    "Chinese": "",
+    "English": "",
+    "Spanish": "",
+    "Portuguese": "",
+    "Indonesian": "ID",
+    "Malay": "MY",
+    "Filipino": "PH",
+    "Japanese": "",
+    "Korean": "",
+    "French": "",
+    "German": "",
+    "Russian": "",
+    "Arabic": "",
+    "Turkish": "",
+    "Hindi": "",
+    "Mixed": "",
+    "Unknown": ""
+  },
+  "region_keywords": {
+    "TH": [
+      "th",
+      "thai",
+      "thailand"
+    ],
+    "VN": [
+      "vn",
+      "viet nam",
+      "vietnam",
+      "việt nam"
+    ],
+    "PH": [
+      "ph",
+      "pinoy",
+      "philippines",
+      "pilipinas"
+    ],
+    "ID": [
+      "id",
+      "indo",
+      "indonesia"
+    ],
+    "MY": [
+      "malaysia"
+    ],
+    "SG": [
+      "sg",
+      "singapore"
+    ],
+    "LATAM": [
+      "latam",
+      "latham",
+      "latin america",
+      "latinoamerica",
+      "latinoamérica",
+      "america latina",
+      "américa latina"
+    ],
+    "MX": [
+      "mexico",
+      "méxico",
+      "mexicano",
+      "mexicana"
+    ],
+    "ES": [
+      "spain",
+      "espana"
+    ],
+    "AR": [
+      "argentina"
+    ],
+    "CL": [
+      "chile"
+    ],
+    "CO": [
+      "colombia"
+    ],
+    "PE": [
+      "peru"
+    ],
+    "BR": [
+      "br",
+      "brasil",
+      "brazil"
+    ],
+    "US": [
+      "usa",
+      "u.s.",
+      "u.s.a.",
+      "united states"
+    ],
+    "CA": [
+      "canada"
+    ],
+    "UK": [
+      "uk",
+      "u.k.",
+      "united kingdom"
+    ],
+    "AU": [
+      "australia"
+    ],
+    "JP": [
+      "jp",
+      "japan"
+    ],
+    "KR": [
+      "kr",
+      "korea",
+      "korean"
+    ],
+    "TW": [
+      "tw",
+      "taiwan"
+    ],
+    "HK": [
+      "hk",
+      "hong kong"
+    ],
+    "CN": [
+      "cn",
+      "china"
+    ],
+    "IN": [
+      "india",
+      "bharat"
+    ],
+    "RU": [
+      "russia"
+    ],
+    "TR": [
+      "turkey",
+      "turkiye"
+    ],
+    "DE": [
+      "germany",
+      "deutschland"
+    ],
+    "FR": [
+      "france"
+    ]
+  },
+  "cdp_url": "http://127.0.0.1:9222",
+  "snapshot_date": "YYYY-MM-DD",
+  "title_variant_overrides": {
+    "All Star Tower Defense": {
+      "search_variants": [
+        {
+          "query": "All Star X Tower Defense",
+          "type": "connector_x",
+          "min_group_size": 1000,
+          "min_today_posts": 20,
+          "min_week_new_fans": 50
+        }
+      ],
+      "seed_group_urls": [
+        "https://www.facebook.com/groups/1992312010946763",
+        "https://www.facebook.com/groups/allstarshinobi"
+      ]
+    }
+  }
+}
