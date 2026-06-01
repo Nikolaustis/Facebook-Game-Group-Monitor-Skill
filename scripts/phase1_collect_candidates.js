@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { chromium } = require('playwright');
+const { createCodexProgressReporter, parseProgressReportEveryMinutes } = require('./progress_reporter');
 
 function clean(s) {
   return (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
@@ -148,8 +149,8 @@ function buildAutomaticSearchVariants(gameName) {
 }
 
 function buildSearchPlan(gameName, config) {
-  const plan = buildAutomaticSearchVariants(gameName);
   const override = getTitleOverride(config, gameName);
+  const plan = override.search_variants_only ? [] : buildAutomaticSearchVariants(gameName);
   const explicitVariants = Array.isArray(override.search_variants) ? override.search_variants : [];
   for (const item of explicitVariants) {
     if (typeof item === 'string') {
@@ -261,7 +262,14 @@ function mergeCandidate(existing, incoming) {
   };
 }
 
-async function runOneSearchQuery(page, gameName, variant, maxMinutes) {
+async function runOneSearchQuery(page, gameName, variant, maxMinutes, progressState) {
+  if (progressState) {
+    progressState.current_query = variant.query;
+    progressState.current_query_variant_type = variant.type;
+    progressState.current_round = 0;
+    progressState.current_query_candidates = 0;
+    progressState.current_query_started_at = new Date().toISOString();
+  }
   const searchUrl = `https://www.facebook.com/search/groups/?q=${encodeURIComponent(variant.query)}`;
   await gotoWithRetry(page, searchUrl);
   await page.waitForTimeout(4500);
@@ -307,6 +315,17 @@ async function runOneSearchQuery(page, gameName, variant, maxMinutes) {
 
     const noMore = await hasNoMoreResultsSignal(page);
     const elapsed = Date.now() - startedAt;
+    if (progressState) {
+      progressState.current_round = rounds;
+      progressState.current_query_candidates = map.size;
+      progressState.total_candidates = Math.max(progressState.total_candidates || 0, (progressState.completed_candidates || 0) + map.size);
+      progressState.last_round_new_groups = newGroups;
+      progressState.last_round_no_new_streak = noNewStreak;
+      progressState.last_round_no_growth_streak = noGrowthStreak;
+      progressState.last_no_more_results_signal = noMore;
+      progressState.last_updated_at = new Date().toISOString();
+    }
+
     stats.push({
       query: variant.query,
       query_variant_type: variant.type,
@@ -352,15 +371,24 @@ async function runOneSearchQuery(page, gameName, variant, maxMinutes) {
   };
 }
 
-async function runOneGame(page, gameName, maxMinutes, config) {
+async function runOneGame(page, gameName, maxMinutes, config, progressState) {
   const searchPlan = buildSearchPlan(gameName, config);
   const map = new Map();
   const allStats = [];
   const queryRuns = [];
 
   const perVariantMaxMinutes = Math.max(8, Math.ceil(maxMinutes / Math.max(searchPlan.length, 1)));
-  for (const variant of searchPlan) {
-    const one = await runOneSearchQuery(page, gameName, variant, perVariantMaxMinutes);
+  if (progressState) {
+    progressState.search_plan_count = searchPlan.length;
+    progressState.per_variant_max_minutes = perVariantMaxMinutes;
+  }
+  for (let variantIdx = 0; variantIdx < searchPlan.length; variantIdx++) {
+    const variant = searchPlan[variantIdx];
+    if (progressState) {
+      progressState.current_query_index = variantIdx + 1;
+      progressState.current_query_total = searchPlan.length;
+    }
+    const one = await runOneSearchQuery(page, gameName, variant, perVariantMaxMinutes, progressState);
     queryRuns.push({
       query: one.query,
       query_variant_type: one.query_variant_type,
@@ -369,6 +397,13 @@ async function runOneGame(page, gameName, maxMinutes, config) {
       candidates_count: one.candidates.length,
     });
     allStats.push(...one.stats);
+    if (progressState) {
+      progressState.completed_queries = (progressState.completed_queries || 0) + 1;
+      progressState.completed_candidates = map.size;
+      progressState.total_candidates = Math.max(progressState.total_candidates || 0, map.size);
+      progressState.last_query_stop_reason = one.stop_reason;
+      progressState.last_updated_at = new Date().toISOString();
+    }
     for (const c of one.candidates) {
       if (!map.has(c.group_url)) map.set(c.group_url, c);
       else map.set(c.group_url, mergeCandidate(map.get(c.group_url), c));
@@ -408,7 +443,32 @@ async function runOneGame(page, gameName, maxMinutes, config) {
   const outDir = path.resolve(args['out-dir'] || `./runs/${Date.now()}`);
   const maxMinutes = Number(args['max-minutes'] || 90);
   const config = loadConfig(args.config || '');
+  const progressReportEveryMinutes = parseProgressReportEveryMinutes(args, config, 30);
+  const outCodexProgress = path.resolve(args['out-codex-progress'] || args['progress-report'] || path.join(outDir, 'codex_progress_report.json'));
   fs.mkdirSync(outDir, { recursive: true });
+
+  const progressState = {
+    phase: 'phase1',
+    out_dir: outDir,
+    total_games: games.length,
+    current_game_name: '',
+    current_game_index: 0,
+    completed_games: 0,
+    current_query: '',
+    current_query_variant_type: '',
+    current_round: 0,
+    current_query_candidates: 0,
+    completed_queries: 0,
+    completed_candidates: 0,
+    total_candidates: 0,
+    last_updated_at: new Date().toISOString(),
+  };
+  const codexProgressReporter = createCodexProgressReporter({
+    phase: 'phase1',
+    intervalMinutes: progressReportEveryMinutes,
+    outFile: outCodexProgress,
+    getProgress: () => ({ ...progressState }),
+  });
 
   const browser = await chromium.connectOverCDP(args.cdp || config.cdp_url || 'http://127.0.0.1:9222');
   const context = browser.contexts()[0] || (await browser.newContext());
@@ -427,14 +487,32 @@ async function runOneGame(page, gameName, maxMinutes, config) {
       },
     };
 
-    for (const gameName of games) {
-      const one = await runOneGame(page, gameName, maxMinutes, config);
+    for (let gameIdx = 0; gameIdx < games.length; gameIdx++) {
+      const gameName = games[gameIdx];
+      progressState.current_game_name = gameName;
+      progressState.current_game_index = gameIdx + 1;
+      progressState.current_query = '';
+      progressState.current_query_variant_type = '';
+      progressState.current_round = 0;
+      progressState.current_query_candidates = 0;
+      progressState.completed_candidates = 0;
+      progressState.last_updated_at = new Date().toISOString();
+      codexProgressReporter.writeSnapshot('game_started');
+
+      const one = await runOneGame(page, gameName, maxMinutes, config, progressState);
       const slug = slugify(gameName);
       const candidatesFile = path.join(outDir, `phase1_${slug}_candidates.json`);
       const statsFile = path.join(outDir, `phase1_${slug}_stats.json`);
 
       fs.writeFileSync(candidatesFile, JSON.stringify(one.candidates, null, 2), 'utf8');
       fs.writeFileSync(statsFile, JSON.stringify({ stats: one.stats, query_runs: one.query_runs, search_plan: one.search_plan, per_variant_max_minutes: one.per_variant_max_minutes }, null, 2), 'utf8');
+
+      progressState.completed_games = gameIdx + 1;
+      progressState.completed_candidates = one.candidates.length;
+      progressState.total_candidates = index.games.reduce((sum, item) => sum + (item.candidates_count || 0), 0) + one.candidates.length;
+      progressState.last_game_stop_reason = one.stop_reason;
+      progressState.last_updated_at = new Date().toISOString();
+      codexProgressReporter.writeSnapshot('game_finished');
 
       index.games.push({
         game_name: gameName,
@@ -453,8 +531,16 @@ async function runOneGame(page, gameName, maxMinutes, config) {
     const indexFile = path.join(outDir, 'phase1_index.json');
     fs.writeFileSync(indexFile, JSON.stringify(index, null, 2), 'utf8');
 
+    progressState.phase1_index = indexFile;
+    progressState.current_query = '';
+    progressState.current_query_variant_type = '';
+    progressState.current_round = 0;
+    progressState.last_updated_at = new Date().toISOString();
+    codexProgressReporter.writeSnapshot('phase1_finished');
+
     console.log(JSON.stringify({ ok: true, phase1_index: indexFile, games: index.games }, null, 2));
   } finally {
+    codexProgressReporter.stop('phase1_stopped');
     await browser.close();
   }
 })();

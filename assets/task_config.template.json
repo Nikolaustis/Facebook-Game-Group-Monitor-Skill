@@ -20,6 +20,7 @@
     ]
   },
   "threshold": 10,
+  "progress_report_every_minutes": 30,
   "allowed_language_signals": [],
   "allowed_regions": [],
   "language_to_region": {
@@ -167,6 +168,9 @@
     ]
   },
   "cdp_url": "http://127.0.0.1:9222",
+  "close_chrome_after_report": true,
+  "shutdown_after_complete": false,
+  "shutdown_delay_seconds": 60,
   "snapshot_date": "YYYY-MM-DD",
   "title_variant_overrides": {
     "All Star Tower Defense": {

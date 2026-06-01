@@ -58,9 +58,9 @@
 ## E. 语言与地区判定
 1. `language` 必须参考群组名称、讨论区前五条玩家发言，以及用户手写 about 文本。
 2. 讨论区前五条玩家发言是语言识别的最高优先级。
-3. 讨论区前五条必须先逐条识别语言，再汇总判断；若前五条中出现两个以上可信语言，`language = Mixed`。
+3. 讨论区前五条必须先逐条识别语言，再汇总判断；若前五条中出现两个以上可信语言，`language = Mixed`。无正文帖、图片/视频帖、或只有极短正文且只抓到 Facebook UI 文案的帖子不得计入语言样本。
 4. 群组名称可作为语言辅助信号，但不得单独覆盖讨论区中更明确的语言证据。
-5. about 文本只允许使用社区成员手写内容；如果 about 区域只有 Facebook UI 结构文本，则不得参考。
+5. about 文本只允许使用社区成员手写内容；如果 about 区域只有 Facebook UI 结构文本，则不得参考。讨论区同理，不得把中文界面的按钮、时间、互动统计、评论入口、翻译入口作为 `Chinese` 证据。
 6. `region` 优先且主要由 `group_name` 中的明确地区语义识别，例如 `VN` / `Vietnam` / `Việt Nam` -> `VN`，`Mexico` / `México` -> `MX`。
 7. 未命中群名地区语义时，仅允许高确定性语言辅助映射，例如 Thai -> TH、Vietnamese -> VN、Indonesian -> ID、Malay -> MY、Filipino -> PH、Lao -> LA、Khmer -> KH、Burmese -> MM。
 8. English、Spanish、Chinese、Arabic、French、Portuguese、Mixed 不得单独映射为国家地区。

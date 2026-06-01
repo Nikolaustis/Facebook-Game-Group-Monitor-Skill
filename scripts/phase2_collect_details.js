@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 const XLSX = require('xlsx');
+const { execFile } = require('child_process');
+const { createCodexProgressReporter, parseProgressReportEveryMinutes } = require('./progress_reporter');
 
 let emergencyFlush = null;
 
@@ -45,6 +47,89 @@ function parseArgs(argv) {
   return out;
 }
 
+
+function boolFromFlag(args, config, dashedName, configName, defaultValue) {
+  const raw = args[dashedName] ?? config[configName];
+  if (raw === undefined || raw === null || raw === '') return defaultValue;
+  if (typeof raw === 'boolean') return raw;
+  const normalized = String(raw).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return defaultValue;
+}
+
+async function closeChromeViaCdp(browser, timeoutMs = 5000) {
+  if (!browser) return { ok: false, reason: 'browser_not_available' };
+  try {
+    const session = await browser.newBrowserCDPSession();
+    await Promise.race([
+      session.send('Browser.close'),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+    return { ok: true, reason: 'Browser.close_sent' };
+  } catch (err) {
+    return { ok: false, reason: err && err.message ? err.message : String(err) };
+  }
+}
+
+
+function parseNonNegativeInt(rawValue, defaultValue) {
+  if (rawValue === undefined || rawValue === null || rawValue === '') return defaultValue;
+  const n = Number(rawValue);
+  if (!Number.isFinite(n)) return defaultValue;
+  return Math.max(0, Math.floor(n));
+}
+
+function buildCompletionPayload(base, overrides = {}) {
+  return {
+    checkpoint_kind: 'facebook_group_monitor_task_complete',
+    checkpoint_version: 1,
+    ...base,
+    ...overrides,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function writeCompletionStatus(outFile, payload) {
+  try {
+    writeJsonAtomic(outFile, payload);
+  } catch (err) {
+    console.error(`[phase2] write completion status failed: ${err && err.stack ? err.stack : err}`);
+  }
+}
+
+function requestWindowsShutdown({ delaySeconds, comment }) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve({ ok: false, requested: false, reason: `unsupported_platform:${process.platform}` });
+      return;
+    }
+
+    const safeDelaySeconds = Math.max(0, Math.floor(Number(delaySeconds) || 0));
+    const safeComment = String(comment || 'FB group monitoring finished. System will shut down.').slice(0, 512);
+    execFile('shutdown.exe', ['/s', '/t', String(safeDelaySeconds), '/c', safeComment], (err, stdout, stderr) => {
+      if (err) {
+        resolve({
+          ok: false,
+          requested: true,
+          reason: err && err.message ? err.message : String(err),
+          stdout: stdout || '',
+          stderr: stderr || '',
+        });
+        return;
+      }
+      resolve({
+        ok: true,
+        requested: true,
+        reason: 'shutdown_command_sent',
+        delay_seconds: safeDelaySeconds,
+        stdout: stdout || '',
+        stderr: stderr || '',
+      });
+    });
+  });
+}
+
 function toInt(v) {
   if (v === null || v === undefined || v === '') return '';
   const n = parseInt(String(v).replace(/[,+\s]/g, ''), 10);
@@ -74,6 +159,20 @@ function countChineseChars(s) {
 function countEnglishLetters(s) {
   const m = (s || '').match(/[A-Za-z]/g);
   return m ? m.length : 0;
+}
+
+function countNonLatinLanguageScriptChars(s) {
+  return countThaiChars(s)
+    + countVnDiacritics(s)
+    + countChineseChars(s)
+    + countPattern(s, /[぀-ヿ]/g)
+    + countPattern(s, /[가-힯]/g)
+    + countPattern(s, /[Ѐ-ӿ]/g)
+    + countPattern(s, /[؀-ۿ]/g)
+    + countPattern(s, /[ऀ-ॿ]/g)
+    + countPattern(s, /[຀-໿]/g)
+    + countPattern(s, /[ក-៿]/g)
+    + countPattern(s, /[က-႟]/g);
 }
 
 function countPattern(s, pattern) {
@@ -286,16 +385,38 @@ function detectLanguageSignal(groupName, aboutText, snippet) {
 }
 
 function looksLikeUiLine(line) {
-  const t = clean(line).toLowerCase();
+  const raw = clean(line);
+  const t = raw.toLowerCase();
   if (!t) return true;
   if (t.length < 8) return true;
-  if (/^\d+([,.]\d+)?\s*[km]?$/.test(t)) return true;
-  if (/^(like|comment|share|send|follow|join|joined|invite|members?|posts?|photos?|videos?|files?|events?)$/i.test(t)) return true;
-  if (/^(赞|评论|分享|发送|加入|已加入|邀请|成员|帖子|照片|视频|文件|活动|简介|讨论|精选|管理)$/u.test(t)) return true;
-  if (/^(公開|公开|私密|小组|社群|社團|首頁|首页|通知|搜尋|搜索|建立|管理)$/u.test(t)) return true;
-  if (/(facebook|messenger|meta|隐私|公開小組|公开小组|私密小组|查看更多|查看全部|发帖|写评论|回复|最相关|所有动态|管理员|版主|邀请成员|加入小组|已加入|小时前|分钟前|刚刚|昨天|今天|赞了|回应了|分享了|评论了|成员|帖子|讨论|简介|精选|照片|视频|文件|活动)/iu.test(t)) return true;
-  if (/^[\p{Script=Han}\s\d,，.。:：()（）]+$/u.test(t) && !/(買|卖|賣|群|服|赛|賽|玩家|公会|公會|交易|账号|帳號|戰|战|足球|手遊|手游|攻略)/u.test(t)) return true;
+  if (/^\d+([,.]\d+)?\s*[km万萬千亿億]?$/.test(t)) return true;
+  if (/^(like|comment|share|send|follow|join|joined|invite|members?|posts?|photos?|videos?|files?|events?|reactions?|all reactions|most relevant|top comments|write a comment|view more comments|see more|see translation)$/i.test(t)) return true;
+  if (/^(赞|讚|评论|留言|分享|发送|傳送|关注|追蹤|加入|已加入|邀请|邀請|成员|成員|帖子|貼文|照片|视频|影片|文件|活动|活動|简介|簡介|讨论|討論|精选|精選|管理|回覆|回复|查看翻译|查看翻譯|查看更多|顯示更多|显示更多|最相关|最相關|所有动态|所有動態)$/u.test(raw)) return true;
+  if (/^(公開|公开|私密|小组|群組|社群|社團|首页|首頁|通知|搜尋|搜索|建立|管理)$/u.test(raw)) return true;
+  if (/(facebook|messenger|meta|privacy|public group|private group|see more|view more|view all|write a comment|top comments|most relevant|all reactions|reply|share|commented|reacted|posted|hrs?|mins?|yesterday|today|\d+\s*(h|m|d)\b)/iu.test(t)) return true;
+  if (/(隐私|隱私|公開小組|公开小组|公開社團|私密小组|私密社團|查看更多|顯示更多|查看全部|查看翻译|查看翻譯|发帖|發佈|发布|寫評論|写评论|留言|回复|回覆|最相关|最相關|所有动态|所有動態|管理员|管理員|版主|邀请成员|邀請成員|加入小组|加入社團|已加入|小时前|小時|分钟前|分鐘|剛剛|刚刚|昨天|今天|赞了|讚了|回应了|回應了|分享了|评论了|留言了|成员|成員|帖子|貼文|讨论|討論|简介|簡介|精选|精選|照片|视频|影片|文件|活动|活動)/iu.test(raw)) return true;
+  if (/^\d+\s*(条评论|則留言|次分享|人回应|人回應|个赞|個讚|位成员|位成員|成员|成員|帖子|貼文)$/u.test(raw)) return true;
+  if (/^[\p{Script=Han}\s\d,，.。:：()（）·•|｜/\\+-]+$/u.test(raw) && !/(買|买|卖|賣|求|收|出|换|換|群|服|赛|賽|玩家|公会|公會|交易|账号|帳號|戰|战|足球|手遊|手游|攻略|大佬|萌新|组队|組隊|好友|钻|鑽|金|币|幣|抽|卡|副本|联盟|聯盟|充值|儲值)/u.test(raw)) return true;
   return false;
+}
+
+function hasStrongChineseLanguageEvidence(text) {
+  const evidence = clean(text);
+  const cjk = countChineseChars(evidence);
+  const latin = countEnglishLetters(evidence);
+  const otherScript = Math.max(0, countNonLatinLanguageScriptChars(evidence) - cjk);
+  if (cjk >= 24) return true;
+  if (cjk >= 10 && /(?:買|买|卖|賣|求|收|出|换|換|群|服|赛|賽|玩家|公会|公會|交易|账号|帳號|戰|战|手遊|手游|攻略|大佬|萌新|组队|組隊|好友|钻|鑽|金幣|金币|抽卡|副本|联盟|聯盟|充值|儲值|伺服器|服务器|活動|活动)/u.test(evidence)) return true;
+  if (cjk >= 16 && latin === 0 && otherScript === 0 && evidence.length >= 16) return true;
+  return false;
+}
+
+function hasEnoughSinglePostLanguageEvidence(language, evidence) {
+  const text = clean(evidence);
+  if (!text) return false;
+  if (language === 'Chinese') return hasStrongChineseLanguageEvidence(text);
+  if (language === 'English') return countEnglishLetters(text) >= 24 || stopwordScore(text, LANGUAGE_STOPWORDS.English || []) >= 3;
+  return true;
 }
 
 function languageEvidenceText(groupName, aboutLanguageText, discussionLanguageText, snippet) {
@@ -373,7 +494,7 @@ function normalizeDetectedLanguage(detected, evidence) {
   if (detected === 'Chinese') {
     const cjk = countChineseChars(evidence);
     const latin = countEnglishLetters(evidence);
-    if (cjk < 40) return latin >= 40 ? 'English' : 'Unknown';
+    if (!hasStrongChineseLanguageEvidence(evidence)) return latin >= 40 ? 'English' : 'Unknown';
     if (latin > 0 && cjk / (cjk + latin) < 0.25) return 'English';
   }
   return detected;
@@ -383,26 +504,33 @@ function detectSinglePostLanguage(postText) {
   const evidence = languageEvidenceText('', '', postText, '');
   if (!evidence) return 'Unknown';
   const detected = normalizeDetectedLanguage(detectLanguageSignal('', evidence, ''), evidence);
-  if (detected && detected !== 'Unknown' && detected !== 'Mixed') return detected;
+  if (
+    detected &&
+    detected !== 'Unknown' &&
+    detected !== 'Mixed' &&
+    hasEnoughSinglePostLanguageEvidence(detected, evidence)
+  ) {
+    return detected;
+  }
 
   const scriptSignals = [
-    ['Thai', countThaiChars(evidence)],
-    ['Vietnamese', countVnDiacritics(evidence)],
-    ['Chinese', countChineseChars(evidence)],
-    ['Arabic', countPattern(evidence, /[\u0600-\u06FF]/g)],
-    ['Hindi', countPattern(evidence, /[\u0900-\u097F]/g)],
-    ['Russian', countPattern(evidence, /[\u0400-\u04FF]/g)],
-    ['Japanese', countPattern(evidence, /[\u3040-\u30FF]/g)],
-    ['Korean', countPattern(evidence, /[\uAC00-\uD7AF]/g)],
-    ['Lao', countPattern(evidence, /[\u0E80-\u0EFF]/g)],
-    ['Khmer', countPattern(evidence, /[\u1780-\u17FF]/g)],
-    ['Burmese', countPattern(evidence, /[\u1000-\u109F]/g)],
-  ].filter(([, count]) => count >= 2);
+    ['Thai', countThaiChars(evidence), 2],
+    ['Vietnamese', countVnDiacritics(evidence), 2],
+    ['Chinese', countChineseChars(evidence), hasStrongChineseLanguageEvidence(evidence) ? 2 : 9999],
+    ['Arabic', countPattern(evidence, /[\u0600-\u06FF]/g), 2],
+    ['Hindi', countPattern(evidence, /[\u0900-\u097F]/g), 2],
+    ['Russian', countPattern(evidence, /[\u0400-\u04FF]/g), 2],
+    ['Japanese', countPattern(evidence, /[\u3040-\u30FF]/g), 2],
+    ['Korean', countPattern(evidence, /[\uAC00-\uD7AF]/g), 2],
+    ['Lao', countPattern(evidence, /[\u0E80-\u0EFF]/g), 2],
+    ['Khmer', countPattern(evidence, /[\u1780-\u17FF]/g), 2],
+    ['Burmese', countPattern(evidence, /[\u1000-\u109F]/g), 2],
+  ].filter(([, count, threshold]) => count >= threshold);
   if (scriptSignals.length === 1) return scriptSignals[0][0];
   if (scriptSignals.length > 1) return 'Mixed';
 
   const latin = countEnglishLetters(evidence);
-  if (latin >= 20) return 'English';
+  if (latin >= 24) return 'English';
   return 'Unknown';
 }
 
@@ -470,10 +598,11 @@ function phraseMatchesText(keyword, compactText, normText) {
   const compactKeyword = normalizeCompact(cleanKeyword);
   const normKeyword = normalizeWords(cleanKeyword).trim();
   if (!compactKeyword && !normKeyword) return false;
+  const isPunctuatedShortCode = /[^\p{Letter}\p{Number}\s]/u.test(cleanKeyword) && compactKeyword.length <= 3;
 
   if (normKeyword && normKeyword.includes(' ')) {
     if (normText.includes(` ${normKeyword} `)) return true;
-    if (compactKeyword && compactText.includes(compactKeyword)) return true;
+    if (!isPunctuatedShortCode && compactKeyword && compactText.includes(compactKeyword)) return true;
     return false;
   }
 
@@ -954,19 +1083,23 @@ async function settleAboutPage(page) {
   await page.waitForTimeout(800);
 }
 
-async function fetchAboutWithRetry(page, groupUrl, maxTry = 2) {
+async function fetchAboutWithRetry(page, groupUrl, maxTry = 2, timeoutMs = 60000) {
   const cleanBase = groupUrl.replace(/\/+$/, '');
   const urls = Array.from(new Set([
     `${cleanBase}/about`,
     `${cleanBase}/about/`,
     `${cleanBase}?view=info`,
   ]));
+  const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 60000);
 
   for (const aboutUrl of urls) {
     for (let i = 1; i <= maxTry; i++) {
+      const remaining = deadline - Date.now();
+      if (remaining < 1000) return { ok: false, text: '', reason: 'CANDIDATE_TIMEOUT' };
       try {
-        await page.goto(aboutUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+        await page.goto(aboutUrl, { waitUntil: 'domcontentloaded', timeout: Math.min(remaining, 60000) });
         await settleAboutPage(page);
+        if (Date.now() >= deadline) return { ok: false, text: '', reason: 'CANDIDATE_TIMEOUT' };
         const currentUrl = page.url();
         if (/\/login|checkpoint|recover|two_step_verification/i.test(currentUrl)) {
           return { ok: false, text: '', reason: 'LOGIN_REQUIRED' };
@@ -987,36 +1120,106 @@ async function fetchAboutWithRetry(page, groupUrl, maxTry = 2) {
 
 async function extractDiscussionPostTexts(page, limit = 5) {
   return page.evaluate((limit) => {
-    const normalize = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const normalize = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
     const uiExact = new Set([
       'like', 'comment', 'share', 'send', 'follow', 'join', 'joined', 'invite',
-      'members', 'posts', 'photos', 'videos', 'files', 'events',
-      '赞', '评论', '分享', '发送', '关注', '加入', '已加入', '邀请', '成员', '帖子', '照片', '视频', '文件', '活动', '简介', '讨论', '精选', '管理',
+      'members', 'posts', 'photos', 'videos', 'files', 'events', 'all reactions',
+      'most relevant', 'top comments', 'write a comment', 'see more', 'view more comments', 'see translation',
+      '赞', '讚', '评论', '留言', '分享', '发送', '傳送', '关注', '追蹤', '加入', '已加入', '邀请', '邀請',
+      '成员', '成員', '帖子', '貼文', '照片', '视频', '影片', '文件', '活动', '活動', '简介', '簡介',
+      '讨论', '討論', '精选', '精選', '管理', '回覆', '回复', '查看更多', '顯示更多', '查看翻译', '查看翻譯',
+      '最相关', '最相關', '所有动态', '所有動態',
     ]);
-    const uiContains = /(facebook|messenger|meta|隐私|公開小組|公开小组|私密小组|查看更多|查看全部|发帖|写评论|回复|最相关|所有动态|管理员|版主|邀请成员|加入小组|已加入|小时前|分钟前|刚刚|昨天|今天|赞了|回应了|分享了|评论了|成员|帖子|讨论|简介|精选|照片|视频|文件|活动)/iu;
+    const uiContains = /(facebook|messenger|meta|privacy|public group|private group|see more|view more|view all|write a comment|top comments|most relevant|all reactions|reply|shared|commented|reacted|posted|hrs?|mins?|yesterday|today|\d+\s*(h|m|d)\b|隐私|隱私|公開小組|公开小组|公開社團|私密小组|私密社團|查看更多|顯示更多|查看全部|查看翻译|查看翻譯|发帖|發佈|发布|寫評論|写评论|留言|回复|回覆|最相关|最相關|所有动态|所有動態|管理员|管理員|版主|邀请成员|邀請成員|加入小组|加入社團|已加入|小时前|小時|分钟前|分鐘|剛剛|刚刚|昨天|今天|赞了|讚了|回应了|回應了|分享了|评论了|留言了|成员|成員|帖子|貼文|讨论|討論|简介|簡介|精选|精選|照片|视频|影片|文件|活动|活動)/iu;
+    const chineseContentHint = /(買|买|卖|賣|求|收|出|换|換|群|服|赛|賽|玩家|公会|公會|交易|账号|帳號|戰|战|足球|手遊|手游|攻略|大佬|萌新|组队|組隊|好友|钻|鑽|金币|金幣|抽卡|副本|联盟|聯盟|充值|儲值|伺服器|服务器|活動|活动)/u;
+    const countLetters = (txt) => (txt.match(/[A-Za-z]/g) || []).length;
+    const countCjk = (txt) => (txt.match(/[\u4E00-\u9FFF]/g) || []).length;
+    const countNonLatinScript = (txt) => (txt.match(/[\u0E00-\u0E7F\u0102\u0103\u0110\u0111\u0128\u0129\u0168\u0169\u01A0\u01A1\u01AF\u01B0\u1EA0-\u1EF9\u3040-\u30FF\uAC00-\uD7AF\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0E80-\u0EFF\u1780-\u17FF\u1000-\u109F]/g) || []).length;
+    const isInteractiveOrChrome = (el) => {
+      if (!el) return true;
+      if (el.closest('[role="button"], [role="menuitem"], [role="menu"], [role="navigation"], [role="banner"], [aria-label][tabindex], button, input, textarea, select')) return true;
+      if (el.closest('h1, h2, h3, header')) return true;
+      const anchor = el.closest('a');
+      if (anchor) {
+        const href = anchor.getAttribute('href') || '';
+        const txt = normalize(anchor.innerText || anchor.textContent || '');
+        // Author names, timestamps and profile/group links are chrome rather than post body.
+        if (/facebook\.com\/(profile\.php|groups\/|people\/|[A-Za-z0-9_.-]+\/?$)/i.test(href) && txt.length <= 80) return true;
+      }
+      return false;
+    };
     const cleanLine = (txt) => {
       const t = normalize(txt);
       const low = t.toLowerCase();
-      if (!t || t.length < 8) return '';
+      if (!t || t.length < 4) return '';
       if (t.length > 800) return '';
       if (uiExact.has(low) || uiExact.has(t)) return '';
       if (uiContains.test(t)) return '';
-      if (/^\d+([,.]\d+)?\s*[km]?$/.test(low)) return '';
-      if (/^[\p{Script=Han}\s\d,，.。:：()（）]+$/u.test(t) && !/(買|卖|賣|群|服|赛|賽|玩家|公会|公會|交易|账号|帳號|戰|战|足球|手遊|手游|攻略)/u.test(t)) return '';
+      if (/^\d+([,.]\d+)?\s*[km万萬千亿億]?$/.test(low)) return '';
+      if (/^\d+\s*(条评论|則留言|次分享|人回应|人回應|个赞|個讚|位成员|位成員|成员|成員|帖子|貼文)$/u.test(t)) return '';
+      if (/^[\p{Script=Han}\s\d,，.。:：()（）·•|｜/\\+-]+$/u.test(t) && !chineseContentHint.test(t)) return '';
+      const cjk = countCjk(t);
+      const latin = countLetters(t);
+      const nonLatin = countNonLatinScript(t);
+      if (cjk > 0 && latin === 0 && nonLatin === cjk && cjk < 4 && !chineseContentHint.test(t)) return '';
+      if (latin > 0 && latin < 6 && cjk === 0 && nonLatin === 0) return '';
       return t;
+    };
+    const meaningfulPostText = (text) => {
+      const t = normalize(text);
+      if (!t) return '';
+      const cjk = countCjk(t);
+      const latin = countLetters(t);
+      const nonLatin = countNonLatinScript(t);
+      if (latin >= 12 || nonLatin >= 4 || (cjk >= 4 && chineseContentHint.test(t)) || cjk >= 10) return t;
+      return '';
+    };
+    const collectMessageBlocks = (article) => {
+      const selectors = [
+        '[data-ad-preview="message"]',
+        '[data-ad-comet-preview="message"]',
+        '[data-ad-preview="message"] div[dir="auto"]',
+        '[data-ad-comet-preview="message"] div[dir="auto"]',
+      ];
+      const lines = [];
+      for (const sel of selectors) {
+        for (const el of Array.from(article.querySelectorAll(sel))) {
+          if (isInteractiveOrChrome(el)) continue;
+          const line = cleanLine(el.innerText || el.textContent || '');
+          if (line) lines.push(line);
+        }
+      }
+      return lines;
+    };
+    const collectFallbackLines = (article) => {
+      const lines = [];
+      for (const el of Array.from(article.querySelectorAll('div[dir="auto"], span[dir="auto"]'))) {
+        if (isInteractiveOrChrome(el)) continue;
+        if (el.querySelector && el.querySelector('[role="button"], a, button, input, textarea, select')) {
+          const direct = Array.from(el.childNodes || [])
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => normalize(node.textContent || ''))
+            .filter(Boolean)
+            .join(' ');
+          const directLine = cleanLine(direct);
+          if (directLine) lines.push(directLine);
+          continue;
+        }
+        const line = cleanLine(el.innerText || el.textContent || '');
+        if (line) lines.push(line);
+      }
+      return lines;
     };
 
     const posts = [];
     const seen = new Set();
     for (const article of Array.from(document.querySelectorAll('[role="article"]'))) {
-      const lines = [];
-      for (const el of Array.from(article.querySelectorAll('div[dir="auto"], span[dir="auto"]'))) {
-        const line = cleanLine(el.innerText || el.textContent || '');
-        if (line) lines.push(line);
-      }
-      const text = Array.from(new Set(lines)).join('\n');
-      if (text.length < 12) continue;
-      const key = text.slice(0, 160);
+      const messageLines = collectMessageBlocks(article);
+      const candidateLines = messageLines.length ? messageLines : collectFallbackLines(article);
+      const deduped = Array.from(new Set(candidateLines));
+      const text = meaningfulPostText(deduped.join('\n'));
+      if (!text) continue;
+      const key = text.slice(0, 180).toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       posts.push(text);
@@ -1039,12 +1242,16 @@ async function settleDiscussionPage(page) {
   }
 }
 
-async function fetchDiscussionLanguageSample(page, groupUrl) {
+async function fetchDiscussionLanguageSample(page, groupUrl, timeoutMs = 60000) {
   const cleanBase = clean(groupUrl || '').replace(/\/+$/, '');
   if (!cleanBase) return { ok: false, text: '', reason: 'MISSING_GROUP_URL' };
+  const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 60000);
   try {
-    await page.goto(cleanBase, { waitUntil: 'domcontentloaded', timeout: 120000 });
+    const remaining = deadline - Date.now();
+    if (remaining < 1000) return { ok: false, text: '', reason: 'CANDIDATE_TIMEOUT' };
+    await page.goto(cleanBase, { waitUntil: 'domcontentloaded', timeout: Math.min(remaining, 60000) });
     await settleDiscussionPage(page);
+    if (Date.now() >= deadline) return { ok: false, text: '', reason: 'CANDIDATE_TIMEOUT' };
     const currentUrl = page.url();
     if (/\/login|checkpoint|recover|two_step_verification/i.test(currentUrl)) {
       return { ok: false, text: '', reason: 'LOGIN_REQUIRED' };
@@ -1151,21 +1358,30 @@ function buildPlainSheet(rows, fields) {
 }
 
 function renameOverwriting(src, dest) {
-  try {
-    fs.renameSync(src, dest);
-  } catch (err) {
-    if (fs.existsSync(dest)) {
-      try { fs.unlinkSync(dest); } catch (_e) { /* ignore */ }
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      fs.renameSync(src, dest);
+      return;
+    } catch (err) {
+      if (fs.existsSync(dest)) {
+        try { fs.unlinkSync(dest); } catch (_e) { /* ignore */ }
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 80 * (attempt + 1));
     }
-    fs.renameSync(src, dest);
   }
+  fs.renameSync(src, dest);
 }
 
 function atomicWriteText(file, content, encoding = 'utf8') {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
   fs.writeFileSync(tmp, content, encoding);
-  renameOverwriting(tmp, file);
+  try {
+    renameOverwriting(tmp, file);
+  } catch (err) {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_e) { /* ignore */ }
+    fs.writeFileSync(file, content, encoding);
+  }
 }
 
 function writeJsonAtomic(file, obj) {
@@ -1177,7 +1393,12 @@ function writeWorkbookAtomic(file, wb) {
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp.xlsx`);
   try {
     XLSX.writeFile(wb, tmp);
-    renameOverwriting(tmp, file);
+    try {
+      renameOverwriting(tmp, file);
+    } catch (err) {
+      XLSX.writeFile(wb, file);
+      try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_e) { /* ignore */ }
+    }
   } catch (err) {
     try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_e) { /* ignore */ }
     throw err;
@@ -1323,7 +1544,16 @@ function resolveCollisions(rows) {
   const outPartialSummary = path.resolve(args['out-partial-summary'] || path.join(path.dirname(indexFile), 'phase2_autosave_summary.json'));
   const outProgress = path.resolve(args['out-progress'] || path.join(path.dirname(indexFile), 'phase2_progress.json'));
   const outCheckpointError = path.resolve(args['out-checkpoint-error'] || path.join(path.dirname(indexFile), 'phase2_autosave_last_error.txt'));
+  const outCodexProgress = path.resolve(args['out-codex-progress'] || args['progress-report'] || path.join(path.dirname(indexFile), 'codex_progress_report.json'));
+  const outCompletion = path.resolve(args['out-completion'] || args['out-complete'] || path.join(path.dirname(indexFile), 'codex_task_complete.json'));
+  const progressReportEveryMinutes = parseProgressReportEveryMinutes(args, config, 30);
+  const closeChromeAfterReport = (args['no-close-chrome'] === 'true' || args['keep-chrome-open'] === 'true')
+    ? false
+    : boolFromFlag(args, config, 'close-chrome-after-report', 'close_chrome_after_report', true);
+  const shutdownAfterComplete = boolFromFlag(args, config, 'shutdown-after-complete', 'shutdown_after_complete', false);
+  const shutdownDelaySeconds = parseNonNegativeInt(args['shutdown-delay-seconds'] ?? config.shutdown_delay_seconds, 60);
   const threshold = Number(args.threshold || config.threshold || 10);
+  const candidateTimeoutMs = Math.max(1000, Number(args['candidate-timeout-ms'] || config.candidate_timeout_ms || 60000));
   const aliasesConfig = config.aliases && typeof config.aliases === 'object' ? config.aliases : {};
   const siblingTitlesConfig = config.sibling_titles && typeof config.sibling_titles === 'object' ? config.sibling_titles : {};
   const ipRootsConfig = config.ip_roots && typeof config.ip_roots === 'object' ? config.ip_roots : {};
@@ -1366,6 +1596,19 @@ function resolveCollisions(rows) {
   const browser = await chromium.connectOverCDP(args.cdp || config.cdp_url || 'http://127.0.0.1:9222');
   const context = browser.contexts()[0] || (await browser.newContext());
   const page = context.pages().find((p) => p.url().includes('facebook.com')) || (await context.newPage());
+  let codexProgressReporter = null;
+  let finalReportGenerated = false;
+  let chromeCloseResult = { ok: false, reason: 'not_requested' };
+  let shutdownResult = { ok: false, requested: false, reason: 'not_requested' };
+  const completionBase = {
+    run_dir: path.dirname(indexFile),
+    index_file: indexFile,
+    out_xlsx: outXlsx,
+    out_summary: outSummary,
+    close_chrome_after_report: closeChromeAfterReport,
+    shutdown_after_complete: shutdownAfterComplete,
+    shutdown_delay_seconds: shutdownDelaySeconds,
+  };
 
   try {
     const stagedRows = [];
@@ -1425,6 +1668,51 @@ function resolveCollisions(rows) {
     let lastCandidateStatus = '';
     let lastCheckpointAt = '';
     let currentGameBreakdown = null;
+    codexProgressReporter = createCodexProgressReporter({
+      phase: 'phase2',
+      intervalMinutes: progressReportEveryMinutes,
+      outFile: outCodexProgress,
+      getProgress: () => ({
+        current_game_name: currentGameName,
+        current_game_index: currentGameIndex,
+        total_games: gameEntries.length,
+        current_candidate_index: currentCandidateIndex,
+        current_candidate_total: currentCandidateTotal,
+        total_processed_candidates: totalProcessedCandidates,
+        staged_rows: stagedRows.length,
+        manual_review_rows: manualReviewRows.length,
+        last_candidate_status: lastCandidateStatus,
+        last_checkpoint_at: lastCheckpointAt,
+        current_game_breakdown: currentGameBreakdown,
+        stats,
+        output_progress_file: outProgress,
+        output_partial_xlsx: outPartialXlsx,
+        output_final_xlsx: outXlsx,
+        close_chrome_after_report: closeChromeAfterReport,
+        shutdown_after_complete: shutdownAfterComplete,
+        shutdown_delay_seconds: shutdownDelaySeconds,
+      }),
+    });
+    const resumeRequested = args.resume === 'true' || args['resume-from-checkpoint'] === 'true';
+    const resumeState = resumeRequested && fs.existsSync(outCheckpoint)
+      ? JSON.parse(fs.readFileSync(outCheckpoint, 'utf8'))
+      : null;
+    const resumeProgress = resumeState && resumeState.progress ? resumeState.progress : null;
+    if (resumeState) {
+      for (const row of (Array.isArray(resumeState.staged_rows) ? resumeState.staged_rows : [])) stagedRows.push(row);
+      for (const row of (Array.isArray(resumeState.manual_review_rows) ? resumeState.manual_review_rows : [])) manualReviewRows.push(row);
+      if (resumeState.stats && typeof resumeState.stats === 'object') {
+        Object.assign(stats, resumeState.stats);
+      }
+      currentGameName = resumeProgress.current_game_name || '';
+      currentGameIndex = Number(resumeProgress.current_game_index || -1);
+      currentCandidateIndex = Number(resumeProgress.current_candidate_index || -1);
+      currentCandidateTotal = Number(resumeProgress.current_candidate_total || 0);
+      totalProcessedCandidates = Number(resumeProgress.total_processed_candidates || 0);
+      lastCandidateStatus = resumeProgress.last_candidate_status || 'resume';
+      lastCheckpointAt = resumeProgress.last_checkpoint_at || '';
+      currentGameBreakdown = resumeProgress.current_game_breakdown || null;
+    }
 
     const makePartialRows = () => {
       const outputSnapshotDate = normalizeSnapshotDate(snapshotDate || config.snapshot_date, new Date().toISOString().slice(0, 10));
@@ -1534,9 +1822,14 @@ function resolveCollisions(rows) {
     };
 
     // Create the partial workbook immediately with headers, then keep it updated only when accepted rows appear.
-    writePartialCheckpoint({ stage: 'phase2_started' }, { writeXlsx: true, writeFullState: true });
+    if (resumeState) {
+      writePartialCheckpoint({ stage: 'phase2_resumed' }, { writeXlsx: true, writeFullState: true });
+    } else {
+      writePartialCheckpoint({ stage: 'phase2_started' }, { writeXlsx: true, writeFullState: true });
+    }
 
     for (let gameIdx = 0; gameIdx < gameEntries.length; gameIdx++) {
+      if (resumeProgress && gameIdx + 1 < Number(resumeProgress.current_game_index || 1)) continue;
       const g = gameEntries[gameIdx];
       const gameName = g.game_name;
       currentGameName = gameName;
@@ -1544,15 +1837,23 @@ function resolveCollisions(rows) {
       const profile = profiles.get(gameName);
       const candidates = JSON.parse(fs.readFileSync(g.candidates_file, 'utf8'));
       currentCandidateTotal = candidates.length;
-      currentCandidateIndex = 0;
+      const resumeCurrentGame = resumeProgress && currentGameIndex === Number(resumeProgress.current_game_index || -1);
+      const resumeStartIndex = resumeCurrentGame
+        ? Math.min(candidates.length, Math.max(0, Number((resumeProgress.current_game_breakdown || {}).processed || resumeProgress.total_processed_candidates || 0)))
+        : 0;
+      currentCandidateIndex = resumeStartIndex;
 
-      const one = { candidates: candidates.length, staged_output: 0, processed: 0 };
+      const one = resumeCurrentGame && resumeProgress.current_game_breakdown
+        ? { ...resumeProgress.current_game_breakdown }
+        : { candidates: candidates.length, staged_output: 0, processed: 0 };
       currentGameBreakdown = one;
-      stats.total_candidates += candidates.length;
+      if (!resumeState || !resumeCurrentGame) stats.total_candidates += candidates.length;
       writePartialCheckpoint({ stage: 'game_started' }, { writeFullState: true });
+      if (codexProgressReporter) codexProgressReporter.writeSnapshot('game_started');
 
-      for (let i = 0; i < candidates.length; i++) {
+      for (let i = resumeStartIndex; i < candidates.length; i++) {
         const c = candidates[i];
+        const candidateStartedAt = Date.now();
         currentCandidateIndex = i + 1;
         let candidateCheckpointWritten = false;
         const markCandidateCheckpoint = (status, extra = {}) => {
@@ -1589,12 +1890,18 @@ function resolveCollisions(rows) {
           stats.about_cache_hits++;
         } else {
           stats.about_fetches++;
-          about = await fetchAboutWithRetry(page, c.group_url, 2);
+          about = await fetchAboutWithRetry(page, c.group_url, 2, candidateTimeoutMs);
           if (aboutCacheKey) aboutCache.set(aboutCacheKey, about);
         }
         if (!about.ok) {
           stats.about_failed++;
-          markCandidateCheckpoint('about_failed', { about_reason: about.reason || '' });
+          markCandidateCheckpoint(about.reason === 'CANDIDATE_TIMEOUT' ? 'candidate_timeout' : 'about_failed', { about_reason: about.reason || '' });
+          continue;
+        }
+        const remainingAfterAbout = candidateTimeoutMs - (Date.now() - candidateStartedAt);
+        if (remainingAfterAbout < 1000) {
+          stats.about_failed++;
+          markCandidateCheckpoint('candidate_timeout', { about_reason: 'CANDIDATE_TIMEOUT' });
           continue;
         }
 
@@ -1690,7 +1997,7 @@ function resolveCollisions(rows) {
           stats.discussion_language_cache_hits++;
         } else {
           stats.discussion_language_fetches++;
-          discussionLanguage = await fetchDiscussionLanguageSample(page, c.group_url);
+          discussionLanguage = await fetchDiscussionLanguageSample(page, c.group_url, remainingAfterAbout);
           if (aboutCacheKey) discussionLanguageCache.set(aboutCacheKey, discussionLanguage);
         }
         if (!discussionLanguage.ok) {
@@ -1736,6 +2043,7 @@ function resolveCollisions(rows) {
 
       stats.game_breakdown[gameName] = one;
       writePartialCheckpoint({ stage: 'game_finished' }, { writeFullState: true });
+      if (codexProgressReporter) codexProgressReporter.writeSnapshot('game_finished');
     }
 
     const resolved = resolveCollisions(stagedRows);
@@ -1816,6 +2124,18 @@ function resolveCollisions(rows) {
     writeJsonAtomic(outCollision, resolved.report);
     writeJsonAtomic(outAudit, stats);
     writeJsonAtomic(outDebugRows, debugRows);
+    finalReportGenerated = true;
+    writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
+      status: 'completed_report_generated',
+      final_report_generated: true,
+      report_created: fs.existsSync(outXlsx),
+      chrome_closed: false,
+      shutdown_requested: false,
+      completed_at: new Date().toISOString(),
+      summary,
+      stats,
+    }));
+    if (codexProgressReporter) codexProgressReporter.writeSnapshot('phase2_finished');
 
     console.log(JSON.stringify({
       ok: true,
@@ -1824,11 +2144,77 @@ function resolveCollisions(rows) {
       out_collision: outCollision,
       out_audit: outAudit,
       out_debug_rows: outDebugRows,
+      close_chrome_after_report: closeChromeAfterReport,
+      shutdown_after_complete: shutdownAfterComplete,
+      shutdown_delay_seconds: shutdownDelaySeconds,
+      out_completion: outCompletion,
       summary,
       stats,
     }, null, 2));
   } finally {
     emergencyFlush = null;
-    await browser.close();
+    if (codexProgressReporter) codexProgressReporter.stop('phase2_stopped');
+    if (finalReportGenerated && closeChromeAfterReport) {
+      chromeCloseResult = await closeChromeViaCdp(browser);
+      console.log(JSON.stringify({
+        event: 'chrome_close_after_report',
+        final_report_generated: true,
+        close_chrome_after_report: closeChromeAfterReport,
+        ...chromeCloseResult,
+      }));
+    }
+    try {
+      await browser.close();
+    } catch (_err) {
+      // Browser.close may fail after Browser.close CDP command has already closed Chrome.
+    }
+
+    if (finalReportGenerated) {
+      const chromeClosed = closeChromeAfterReport ? Boolean(chromeCloseResult && chromeCloseResult.ok) : false;
+      writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
+        status: 'completed',
+        final_report_generated: true,
+        report_created: fs.existsSync(outXlsx),
+        chrome_closed: chromeClosed,
+        chrome_close_result: chromeCloseResult,
+        shutdown_requested: false,
+        shutdown_result: shutdownResult,
+        completed_at: new Date().toISOString(),
+      }));
+
+      if (shutdownAfterComplete) {
+        if (!closeChromeAfterReport) {
+          shutdownResult = {
+            ok: false,
+            requested: false,
+            reason: 'shutdown_skipped_because_close_chrome_after_report_is_false',
+          };
+        } else {
+          shutdownResult = await requestWindowsShutdown({
+            delaySeconds: shutdownDelaySeconds,
+            comment: 'FB group monitoring finished. System will shut down.',
+          });
+        }
+        writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
+          status: shutdownResult.ok ? 'completed_shutdown_scheduled' : 'completed_shutdown_not_scheduled',
+          final_report_generated: true,
+          report_created: fs.existsSync(outXlsx),
+          chrome_closed: chromeClosed,
+          chrome_close_result: chromeCloseResult,
+          shutdown_requested: Boolean(shutdownAfterComplete),
+          shutdown_result: shutdownResult,
+          completed_at: new Date().toISOString(),
+        }));
+        console.log(JSON.stringify({
+          event: 'shutdown_after_complete',
+          final_report_generated: true,
+          close_chrome_after_report: closeChromeAfterReport,
+          shutdown_after_complete: shutdownAfterComplete,
+          shutdown_delay_seconds: shutdownDelaySeconds,
+          ...shutdownResult,
+          cancel_command: shutdownResult.requested ? 'shutdown.exe /a' : '',
+        }));
+      }
+    }
   }
 })();

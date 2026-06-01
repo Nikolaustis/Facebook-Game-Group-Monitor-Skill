@@ -4,7 +4,9 @@ param(
   [int]$Threshold = 10,
   [string]$RunDir = "",
   [string]$Cdp = "http://127.0.0.1:9222",
-  [string]$Config = ""
+  [string]$Config = "",
+  [switch]$ShutdownAfterComplete,
+  [int]$ShutdownDelaySeconds = 60
 )
 
 if ([string]::IsNullOrWhiteSpace($RunDir)) {
@@ -52,6 +54,9 @@ $phase2Args = @(
 )
 if (-not [string]::IsNullOrWhiteSpace($Config)) {
   $phase2Args += @("--config", $Config)
+}
+if ($ShutdownAfterComplete) {
+  $phase2Args += @("--shutdown-after-complete", "true", "--shutdown-delay-seconds", ([string]$ShutdownDelaySeconds))
 }
 node @phase2Args
 

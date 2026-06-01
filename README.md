@@ -1,8 +1,8 @@
-# FB Game Group Monitor Skill V3.6.4
+# FB Game Group Monitor Skill V3.6.7
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V3.6.4 保留“受控标题变体”机制：自动覆盖低风险的标点/空格写法差异，同时把 `connector_x` 这类高风险变体限制在配置 allowlist 内，避免 Anime、Ragnarok 等多游戏批量任务互相串群。本版将第二阶段自动保存改为“进度 JSON 每候选保存 + 命中行 xlsx 立即保存”，避免每个候选都重写完整 Excel。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V3.6.7 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发。
 
 ## 核心能力
 
@@ -18,7 +18,8 @@
 - “关于这个小组”只在存在用户手写的非 UI 内容时作为最低优先级兜底。
 - 地区判断优先看群组名称中的明确地区语义，例如 `VN`、`Vietnam`、`Thailand`、`Indonesia`、`Mexico`、`PH`。
 - Excel 输出固定列顺序，`snapshot_date` 和 `group_id` 强制文本格式，活跃指数/规模增速为百分比公式。
-- Codex 长任务运行时默认每 30 分钟输出一次 `codex_progress_report`，并刷新 `codex_progress_report.json`。
+- 后台启动后会立即返回 PID 与日志路径；第二轮默认每 30 分钟输出一次 `codex_progress_report`，并刷新 `codex_progress_report.json`。
+- 可选“完成后关机”：默认不启用，只有命令加入 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true` 后，才会在最终报表生成并关闭 Chrome 后执行 Windows 关机。
 
 ## 变体规则
 
@@ -58,35 +59,66 @@
 ```
 
 
-## Codex 长任务进度汇报
+## Codex 后台运行与进度汇报
 
-第一轮和第二轮脚本都内置定时进度汇报，默认每 30 分钟执行一次：
+建议在 Codex 中使用后台启动脚本，不要直接前台运行长抓取命令：
 
-- 终端输出一行 JSON，`event` 固定为 `codex_progress_report`。
-- JSON 中的 `message` 字段是中文摘要，可直接作为给用户的进度反馈。
-- 当前 run 目录会同步刷新 `codex_progress_report.json`。
-- 第一轮包含当前游戏、搜索变体、滚动轮次、当前查询候选数、总候选估算。
-- 第二轮包含当前游戏、候选处理序号、累计处理候选数、已暂存有效行、最近候选状态。
+```powershell
+# 打开 Chrome 登录窗口
+npm run login:bg
 
-调整间隔：
+# 用户登录后，后台验证登录态
+npm run validate-login:bg -- -RunDir ".\runs\demo"
+
+# 后台第一轮
+npm run phase1:bg -- -Games "All Star Tower Defense" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json"
+
+# 后台第二轮；默认 30 分钟刷新/输出一次 codex_progress_report，完成后自动关闭 Chrome
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json"
+
+# 只有用户明确要求“完成后关机”时，才加入这个开关；默认不要加
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -ShutdownAfterComplete -ShutdownDelaySeconds 60
+```
+
+后台启动脚本会立即返回：
+
+- `pid`：后台进程 ID。
+- `run_dir`：当前输出目录。
+- `stdout_log` / `stderr_log`：后台日志。
+- `codex_progress_report.json`：Codex 进度快照。
+- `background_task.json`：本次后台任务元信息。
+- `codex_task_complete.json`：第二轮完成状态；若启用关机，会记录关机命令是否已发出。
+
+查看状态：
+
+```powershell
+npm run status:bg -- -RunDir ".\runs\demo"
+```
+
+第二轮默认每 30 分钟输出一次 `codex_progress_report` 并刷新 `codex_progress_report.json`。输出 JSON 中的 `message` 字段是中文进度摘要，可直接发给用户。
+
+可通过命令行、配置或环境变量调整间隔：
 
 ```powershell
 node .\scripts\phase2_collect_details.js --index ".\runs\demo\phase1_index.json" --progress-report-every-minutes 30
 ```
 
-也可以在 `task_config.json` 中设置：
-
 ```json
 {
-  "progress_report_every_minutes": 30
+  "progress_report_every_minutes": 30,
+  "close_chrome_after_report": true,
+  "shutdown_after_complete": false,
+  "shutdown_delay_seconds": 60
 }
 ```
 
-设为 `0` 可关闭定时汇报。
+设为 `0` 可关闭定时汇报。第二轮最终 Excel 报告生成后默认自动关闭 Chrome；如需保留浏览器，加 `--no-close-chrome true`，或在配置中设置 `"close_chrome_after_report": false`。
+
+自动关机默认关闭。只有当用户在提示词中明确要求“完成后关机 / 跑完关机”时，Codex 才能使用 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true`。触发后会在最终报表写入成功、Chrome 关闭后执行：`shutdown.exe /s /t <秒数>`；默认延迟 60 秒，期间可用 `shutdown.exe /a` 取消。
 
 ## 输出文件
 
-第二阶段最终生成：
+第二阶段最终生成；完整 Excel 报告写入成功后，默认通过 Chrome CDP 自动关闭采集浏览器：
 
 - `fb_monitoring_filtered.xlsx`
 - `fb_monitoring_filtered_summary.json`
@@ -96,12 +128,13 @@ node .\scripts\phase2_collect_details.js --index ".\runs\demo\phase1_index.json"
 
 第二阶段运行中会即时生成/刷新：
 
-- `codex_progress_report.json`: Codex 定时进度快照，默认每 30 分钟刷新一次，并向终端输出 `codex_progress_report`。
+- `codex_progress_report.json`: Codex 定时进度快照，第二轮默认每 30 分钟刷新一次，并向 stdout 日志输出 `codex_progress_report`。
 - `phase2_progress.json`: 轻量进度文件，每处理 1 个候选刷新一次；用于观察当前跑到哪个游戏/第几个候选。
 - `phase2_autosave_state.json`: 完整恢复状态；在阶段开始、游戏边界、每条命中有效行、异常退出前刷新，包含已通过筛选的 `staged_rows`、人工复核行和统计。
 - `phase2_autosave_summary.json`: 当前局部摘要，保持兼容旧观察命令。
 - `partial_verified_rows.xlsx`: 已通过筛选行的可读暂存表；启动时先创建表头，每命中 1 条有效群组就立即保存。
 - `phase2_autosave_last_error.txt`: 仅当暂存 Excel 写入失败时出现；通常是文件被 Excel 打开占用。
+- `codex_task_complete.json`: 第二轮最终状态文件，记录完整报表是否生成、Chrome 是否关闭、是否请求关机以及关机命令结果。
 
 Excel 工作簿包含：
 
@@ -132,7 +165,7 @@ Excel 格式规则：
 2. 群组名称。
 3. 用户手写的“关于这个小组”非 UI 文本。
 
-不得把 Facebook 界面语言、按钮、导航、固定结构文案、空 about 区块结构文字当作语言证据。
+不得把 Facebook 界面语言、按钮、导航、固定结构文案、空 about 区块结构文字当作语言证据。若前五条可见帖子是无正文的图片/视频帖，或正文极短且只能抓到“成员、帖子、刚刚、查看更多、最相关、评论、分享、查看翻译”等界面文案，则该帖不计入语言证据；证据不足时返回 `Unknown`，不得默认判为 `Chinese`。
 
 地区判断优先级：
 
@@ -153,19 +186,25 @@ npm install
 打开 Chrome 并手动登录 Facebook：
 
 ```powershell
-npm run login
+npm run login:bg
 ```
 
-第一阶段：
+用户完成登录后验证登录态：
 
 ```powershell
-npm run phase1 -- --games "All Star Tower Defense" --out-dir ".\runs\demo" --config ".\runs\demo\task_config.json" --cdp "http://127.0.0.1:9222"
+npm run validate-login:bg -- -RunDir ".\runs\demo"
 ```
 
-第二阶段：
+第一阶段后台运行：
 
 ```powershell
-npm run phase2 -- --index ".\runs\demo\phase1_index.json" --config ".\runs\demo\task_config.json" --out-xlsx ".\runs\demo\fb_monitoring_filtered.xlsx"
+npm run phase1:bg -- -Games "All Star Tower Defense" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -Cdp "http://127.0.0.1:9222"
+```
+
+第二阶段后台运行：
+
+```powershell
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -Cdp "http://127.0.0.1:9222"
 ```
 
 第二阶段默认采用更轻的即时保存方式：
@@ -182,10 +221,10 @@ node .\scripts\finalize_partial_xlsx.js --dir ".\runs\demo" --snapshot-date "202
 
 恢复脚本优先读取 `phase2_autosave_state.json`；如果没有该文件，才回退读取 `partial_verified_rows.xlsx`。`phase2_progress.json` 主要用于观察进度，不直接作为最终 Excel 的数据源。
 
-一键流程：
+一键流程也可以后台运行：
 
 ```powershell
-npm run monitor -- -Games "Anime Guardians,Anime Last Stand,Anime Overload,Anime Rangers X,Anime Tactical Simulator,Anime Vanguards" -Config ".\runs\demo\task_config.json"
+npm run monitor:bg -- -Games "Anime Guardians,Anime Last Stand,Anime Overload,Anime Rangers X,Anime Tactical Simulator,Anime Vanguards" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json"
 ```
 
 ## 仓库结构
