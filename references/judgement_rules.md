@@ -61,13 +61,14 @@
 3. 讨论区前五条必须先逐条识别语言，再汇总判断；若前五条中出现两个以上可信语言，`language = Mixed`。无正文帖、图片/视频帖、或只有极短正文且只抓到 Facebook UI 文案的帖子不得计入语言样本。
 4. 群组名称可作为语言辅助信号，但不得单独覆盖讨论区中更明确的语言证据。
 5. about 文本只允许使用社区成员手写内容；如果 about 区域只有 Facebook UI 结构文本，则不得参考。讨论区同理，不得把中文界面的按钮、时间、互动统计、评论入口、翻译入口作为 `Chinese` 证据。
-6. `region` 采用“国家/地区识别 -> 业务区域归并输出”的两层规则。优先从 `group_name` 中识别明确国家、地区、属地或大区语义。
-7. 东亚与东南亚具体国家/地区按自身输出；SEA 只有在群名明确涵盖整个 Southeast Asia / ASEAN 时才输出 `SEA`。
-8. Middle East、Central Asia、South Asia、North America、LATAM、Africa、EUR、Oceania 按业务大区归并；BR 单列；TR、NL、DE、FR、IT、PL、RU 单列。
-9. 若明确识别到非洲国家，即使语言是 Arabic，也必须优先输出 `Africa`；Egypt 例外，归入 `Middle East`。
-10. 未命中群名地区语义时，仅允许高确定性语言辅助映射：Thai -> TH、Vietnamese -> VN、Indonesian -> ID、Malay -> MY、Filipino -> PH、Lao -> LA、Khmer -> KH、Burmese -> MM、Arabic/Persian -> Middle East。
-11. English、Spanish、Chinese、French、Portuguese、Mixed 不得单独映射为国家地区。
-12. 不设置语言或地区硬限制时，所有地区和语言均可收录，但必须展示识别结果与来源字段。
+6. `region` 采用“国家/地区识别 -> 业务区域归并输出 -> 同大区多命中折叠”的三层规则。优先从 `group_name` 中识别明确国家、地区、属地或大区语义。
+7. 东亚与东南亚单一具体国家/地区按自身输出；如果同一群名同时命中多个东亚国家/地区，则输出 `EA`；如果同时命中多个东南亚国家/地区，则输出 `SEA`。例如 `MY + SG`、`TH + VN` 输出 `SEA`。
+8. Middle East、Central Asia、South Asia、North America、LATAM、Africa、EUR、Oceania 按业务大区归并；BR 单列；TR、NL、DE、FR、IT、PL、RU 单列。若多个命中项都属于同一业务大区，则输出该业务大区，例如 `DE + FR` 输出 `EUR`。
+9. 若命中项跨业务大区，则视为 `keyword_conflict` 并留空，例如 `UAE + PH`、`US + BR`、`JP + TH`。
+10. 若明确识别到非洲国家，即使语言是 Arabic，也必须优先输出 `Africa`；Egypt 例外，归入 `Middle East`。
+11. 未命中群名地区语义时，仅允许高确定性语言辅助映射：Thai -> TH、Vietnamese -> VN、Indonesian -> ID、Malay -> MY、Filipino -> PH、Lao -> LA、Khmer -> KH、Burmese -> MM、Arabic/Persian -> Middle East。
+12. English、Spanish、Chinese、French、Portuguese、Mixed 不得单独映射为国家地区。
+13. 不设置语言或地区硬限制时，所有地区和语言均可收录，但必须展示识别结果与来源字段。
 
 ## F. 不输出规则
 以下记录不得进入 `detail` 工作表：

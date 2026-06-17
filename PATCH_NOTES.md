@@ -1,47 +1,31 @@
-# Patch Notes - V3.6.7
+# Patch Notes - V4.0.0
 
-本补丁基于上一版 `fb-group-monitor-skill-v3.6.6-background-progress-close-patch.zip` 继续修改，只包含需要覆盖的文件。
+本次版本将 Skill 从 `fb-group-monitor-v3.6.7` 升级为 `fb-group-monitor-v4.0.0`，核心改动是优化 `region` 归并逻辑，解决同一业务大区下多个国家/地区同时命中时被误判为跨区冲突的问题。
 
 ## 本次改动
 
-1. 新增“完成后关机”显式开关
-   - 默认不自动关机。
-   - 只有用户明确要求“完成后关机 / 跑完关机 / 生成报表后关机”时，才传入 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true`。
-   - 默认关机延迟为 60 秒，可通过 `-ShutdownDelaySeconds 60` 或 `--shutdown-delay-seconds 60` 调整。
+1. 新增同业务大区多命中折叠规则
+   - 单一国家/地区命中时，仍按既有规则输出。
+   - 如果同一群名同时命中多个国家/地区，但它们都属于同一个业务大区，则输出对应业务大区。
+   - 例如：`MY + SG`、`TH + VN`、`ID + PH` 输出 `SEA`；`HK + TW` 输出 `EA`；`DE + FR` 输出 `EUR`。
 
-2. 触发顺序
-   - 第二轮完整 Excel 报表、summary、collision、audit、debug rows 全部写入成功。
-   - 默认通过 CDP 关闭 Chrome。
-   - 写入 `codex_task_complete.json`。
-   - 若显式启用关机，则执行 `shutdown.exe /s /t <秒数>`。
+2. 保留跨业务大区冲突置空规则
+   - 如果命中项跨业务大区，仍输出空 `region`，并把 `__region_source` 标为 `keyword_conflict`。
+   - 例如：`UAE + PH`、`US + BR`、`JP + TH` 不强行归并。
 
-3. 状态记录
-   - 新增/刷新 `codex_task_complete.json`，记录：完整报表是否生成、Chrome 是否关闭、是否请求关机、关机命令结果。
-   - `show_background_task_status.ps1` 会读取并展示该完成状态。
+3. 新增地区来源标记
+   - 同一业务大区内多命中折叠时，`__region_source` 输出：
+     - `country_keyword_same_business_region`
+     - `region_keyword_same_business_region`
+   - `__region_keyword_hits` 仍保留每个命中项，便于人工审计。
 
-4. 后台脚本支持
-   - `start_background_task.ps1 -Task phase2` 支持 `-ShutdownAfterComplete` 和 `-ShutdownDelaySeconds`。
-   - `monitor:bg` 对应的一键流程也支持传递相同参数。
+4. 新增 EA 直接大区关键词
+   - `direct_region_keywords` 新增 `EA`，覆盖 `east asia`、`eastern asia`、`east asian`、`东亚`、`東亞`。
 
-## 使用示例
-
-普通运行，不关机：
-
-```powershell
-npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json"
-```
-
-明确要求完成后关机时：
-
-```powershell
-npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -ShutdownAfterComplete -ShutdownDelaySeconds 60
-```
-
-取消 Windows 关机倒计时：
-
-```powershell
-shutdown.exe /a
-```
+5. 版本号更新
+   - `SKILL.md`：`fb-group-monitor-v4.0.0`
+   - `README.md`：`FB Game Group Monitor Skill V4.0.0`
+   - `package.json` / `package-lock.json`：`4.0.0`
 
 ## 覆盖文件清单
 
@@ -52,8 +36,19 @@ PATCH_NOTES.md
 package.json
 package-lock.json
 assets/task_config.template.json
+references/judgement_rules.md
+references/quality_checklist.md
+references/xlsx_schema.md
 scripts/phase2_collect_details.js
-scripts/run_multi_games_v2.ps1
-scripts/start_background_task.ps1
-scripts/show_background_task_status.ps1
+scripts/fix_one_piece_region_labels.js
+```
+
+## 验证建议
+
+覆盖后在 Skill 根目录执行：
+
+```powershell
+node --check .\scripts\phase2_collect_details.js
+node --check .\scripts\fix_one_piece_region_labels.js
+node -e "JSON.parse(require('fs').readFileSync('.\\package.json','utf8')); JSON.parse(require('fs').readFileSync('.\\assets\\task_config.template.json','utf8')); console.log('json ok')"
 ```

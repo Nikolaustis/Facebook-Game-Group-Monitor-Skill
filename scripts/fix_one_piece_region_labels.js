@@ -64,8 +64,35 @@ function normalizeRegionOutput(region) {
   return LEGACY_REGION_OUTPUT_MAP[key] || key;
 }
 
+const SAME_BUSINESS_REGION_BUCKET_MAP = {
+  CN: 'EA', HK: 'EA', MO: 'EA', TW: 'EA', JP: 'EA', KR: 'EA', KP: 'EA', MN: 'EA', EA: 'EA',
+  TH: 'SEA', VN: 'SEA', PH: 'SEA', ID: 'SEA', MY: 'SEA', SG: 'SEA', BN: 'SEA', LA: 'SEA', KH: 'SEA', MM: 'SEA', TL: 'SEA', SEA: 'SEA',
+  'Middle East': 'Middle East',
+  'Central Asia': 'Central Asia',
+  'South Asia': 'South Asia',
+  'North America': 'North America',
+  LATAM: 'LATAM',
+  BR: 'BR',
+  Africa: 'Africa',
+  TR: 'EUR', NL: 'EUR', DE: 'EUR', FR: 'EUR', IT: 'EUR', PL: 'EUR', RU: 'EUR', EUR: 'EUR',
+  Oceania: 'Oceania',
+};
+
+function normalizeSameBusinessRegionBucket(region) {
+  const normalized = normalizeRegionOutput(region);
+  return SAME_BUSINESS_REGION_BUCKET_MAP[normalized] || normalized || '';
+}
+
+function resolveSameBusinessRegionConflict(matchedRegions) {
+  const regions = unique((matchedRegions || []).map((x) => normalizeRegionOutput(x)).filter(Boolean));
+  if (regions.length <= 1) return regions[0] || '';
+  const buckets = unique(regions.map((x) => normalizeSameBusinessRegionBucket(x)).filter(Boolean));
+  if (buckets.length === 1) return buckets[0];
+  return '';
+}
+
 const DEFAULT_COUNTRY_REGION_KEYWORDS = {
-  // East Asia: output each country/territory itself.
+  // East Asia: single-country/territory hits output themselves; multi-country hits within EA fold to EA.
   CN: ['cn', 'china', 'mainland china', 'china mainland', '中国大陆', '中國大陸', '中国', '中國'],
   HK: ['hk', 'hong kong', '香港'],
   MO: ['mo', 'macau', 'macao', '澳门', '澳門'],
@@ -75,7 +102,7 @@ const DEFAULT_COUNTRY_REGION_KEYWORDS = {
   KP: ['kp', 'north korea', 'dprk', '朝鲜', '朝鮮', '北韩', '北韓', '북한'],
   MN: ['mn', 'mongolia', 'mongolian', 'Монгол', '蒙古'],
 
-  // Southeast Asia: output each country/territory itself unless the group explicitly covers SEA as a whole.
+  // Southeast Asia: single-country hits output themselves; multi-country hits within SEA fold to SEA.
   TH: ['th', 'thai', 'thailand', 'ประเทศไทย', 'ไทย'],
   VN: ['vn', 'viet nam', 'vietnam', 'việt nam'],
   PH: ['ph', 'pinoy', 'philippines', 'pilipinas'],
@@ -153,6 +180,7 @@ const DEFAULT_COUNTRY_REGION_KEYWORDS = {
 };
 
 const DEFAULT_DIRECT_REGION_KEYWORDS = {
+  EA: ['east asia', 'eastern asia', 'east asian', '东亚', '東亞'],
   SEA: ['southeast asia', 'south east asia', 'south-east asia', 'asean', 's.e.a.', 'sea server', 'sea players', 'sea region'],
   'Middle East': ['middle east', 'mena', 'gcc', 'gulf countries', 'arab countries', 'arab world', 'arabic'],
   'Central Asia': ['central asia', 'central asian'],
@@ -219,7 +247,11 @@ function detectRegionByKeywordMap(groupName, regionKeywords, source) {
   }
   const matchedRegions = unique(hits.map((x) => x.region).filter(Boolean));
   if (matchedRegions.length === 1) return { region: matchedRegions[0], source, keyword_hits: hits };
-  if (matchedRegions.length > 1) return { region: '', source: 'keyword_conflict', keyword_hits: hits };
+  if (matchedRegions.length > 1) {
+    const sameBusinessRegion = resolveSameBusinessRegionConflict(matchedRegions);
+    if (sameBusinessRegion) return { region: sameBusinessRegion, source: `${source}_same_business_region`, keyword_hits: hits };
+    return { region: '', source: 'keyword_conflict', keyword_hits: hits };
+  }
   return { region: '', source: '', keyword_hits: [] };
 }
 
@@ -228,10 +260,10 @@ const directRegionKeywords = mergeKeywordMap(DEFAULT_DIRECT_REGION_KEYWORDS, nul
 
 function detectRegionByGroupName(groupName) {
   const countryMatch = detectRegionByKeywordMap(groupName, countryRegionKeywords, 'country_keyword');
-  if (countryMatch.source === 'country_keyword' && countryMatch.region) return countryMatch;
+  if (countryMatch.source && countryMatch.source !== 'keyword_conflict' && countryMatch.region) return countryMatch;
   if (countryMatch.source === 'keyword_conflict') return countryMatch;
   const directRegionMatch = detectRegionByKeywordMap(groupName, directRegionKeywords, 'region_keyword');
-  if (directRegionMatch.source === 'region_keyword' && directRegionMatch.region) return directRegionMatch;
+  if (directRegionMatch.source && directRegionMatch.source !== 'keyword_conflict' && directRegionMatch.region) return directRegionMatch;
   if (directRegionMatch.source === 'keyword_conflict') return directRegionMatch;
   return { region: '', source: '', keyword_hits: [] };
 }

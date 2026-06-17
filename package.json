@@ -1,7 +1,7 @@
 {
-  "name": "fb-group-monitor-skill-v3-6-7",
-  "version": "3.6.7",
-  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with background launch, phase-2 progress reports, autosave, and automatic Chrome close after final report, and optional explicit shutdown after completion",
+  "name": "fb-group-monitor-skill-v4-0-0",
+  "version": "4.0.0",
+  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with background launch, phase-2 progress reports, region normalization v4 same-business-region conflict folding, autosave, automatic Chrome close after final report, and optional explicit shutdown after completion",
   "private": true,
   "scripts": {
     "login": "powershell -ExecutionPolicy Bypass -File .\\scripts\\open_chrome_9222.ps1",

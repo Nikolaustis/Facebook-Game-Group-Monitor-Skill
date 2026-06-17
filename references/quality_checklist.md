@@ -41,8 +41,8 @@
 - [ ] 拉丁语系群组不应因为英文游戏词被误判为 `English`。
 - [ ] 地区优先来自群组名称中的明确国家/地区/属地/大区语义。
 - [ ] `region` 已按业务规则归并：Middle East、Central Asia、South Asia、North America、LATAM、Africa、EUR、Oceania 等不再拆成过多国家。
-- [ ] 东亚与东南亚具体国家/地区仍按自身输出；只有明确覆盖整个 SEA / ASEAN 时才输出 `SEA`。
-- [ ] Brazil 输出 `BR`；Turkey、Netherlands、Germany、France、Italy、Poland、Russia 分别输出 `TR`、`NL`、`DE`、`FR`、`IT`、`PL`、`RU`。
+- [ ] 东亚与东南亚单一国家/地区仍按自身输出；同一业务大区内多国家/地区同时命中时，输出对应大区，例如 `MY + SG` -> `SEA`、`HK + TW` -> `EA`。
+- [ ] Brazil 单独输出 `BR`；Turkey、Netherlands、Germany、France、Italy、Poland、Russia 单一命中时分别输出 `TR`、`NL`、`DE`、`FR`、`IT`、`PL`、`RU`；多个欧洲命中同属欧洲业务大区时可折叠为 `EUR`。
 - [ ] 明确非洲国家优先输出 `Africa`；Arabic / Persian 只在国家未知时辅助输出 `Middle East`。
 - [ ] English / Spanish / Chinese / French / Portuguese / Mixed 只作为语言展示，不得单独映射成国家地区。
 

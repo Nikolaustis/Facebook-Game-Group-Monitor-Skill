@@ -16,7 +16,7 @@ snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size
 ## detail 字段说明
 
 - `snapshot_date`：文本格式，示例 `2026-05-07`，不得保存为 Excel 日期序列号。
-- `region`：优先由群组名称中的明确国家/地区/属地/大区语义得到，再按业务区域规则归并输出；无法确定时留空。
+- `region`：优先由群组名称中的明确国家/地区/属地/大区语义得到，再按业务区域规则归并输出；若多个命中项属于同一业务大区，输出该大区；跨业务大区冲突或无法确定时留空。
 - `language`：以讨论区前五条可见玩家发言为主，先逐条识别再汇总；若前五条出现两个以上可信语言，标记为 `Mixed`。群名辅助，用户手写 about 非 UI 文本最低优先级兜底。
 - `game_name`：用户输入的目标游戏名。
 - `group_name`：Facebook 群组名称。seed URL 候选若第一轮无群名，第二轮应从页面补取。
@@ -32,7 +32,7 @@ snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size
 - `action`：`add` / `update` / 留空。
 - `action_reason`：输出记录必须填写，并体现实际阈值，例如 `today_posts>=20; existed_last_month=yes`。
 - `risk_level`：`low` / `medium` / `high`。
-- `__region_source`：地区来源，例如 `country_keyword` / `region_keyword` / `language_map` / `keyword_conflict` / 留空。
+- `__region_source`：地区来源，例如 `country_keyword` / `region_keyword` / `country_keyword_same_business_region` / `region_keyword_same_business_region` / `language_map` / `keyword_conflict` / 留空。
 - `__region_keyword_hits`：地区关键词命中详情。
 
 ## manual_review 固定列顺序

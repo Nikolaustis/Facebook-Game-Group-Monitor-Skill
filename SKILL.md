@@ -1,9 +1,9 @@
 ---
-name: fb-group-monitor-v3.6.7
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V3.6.7 支持 Codex 后台启动登录态验证、第一轮抓取和第二轮抓取，启动后应立即把控制权还给用户；第二轮默认每 30 分钟写入/输出 Codex 进度汇报；最终 Excel 报告生成后自动关闭 Chrome；只有用户明确要求时才可在完成后自动关机。
+name: fb-group-monitor-v4.0.0
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V4.0.0 支持 Codex 后台启动登录态验证、第一轮抓取和第二轮抓取，启动后应立即把控制权还给用户；第二轮默认每 30 分钟写入/输出 Codex 进度汇报；最终 Excel 报告生成后自动关闭 Chrome；只有用户明确要求时才可在完成后自动关机。
 ---
 
-# Facebook Group Monitor V3.6.7
+# Facebook Group Monitor V4.0.0
 
 ## 必须先读
 
@@ -151,21 +151,27 @@ source_query, query_variant_type, source_game_name, source_is_seed_url, source_q
 
 ## 地区判断
 
-地区优先由 `group_name` 中的明确地区语义判断，例如：
+V4.0.0 的 `region` 采用“具体国家/地区/属地识别 -> 业务区域归并输出 -> 同大区多命中折叠”的三层规则。
 
-- `VN` / `Vietnam` / `Việt Nam` -> `VN`
-- `Thailand` / `Thai` -> `TH`
-- `Indonesia` / `Indo` -> `ID`
-- `Mexico` / `México` -> `MX`
-- `Laos` / Lao script -> `LA`
+单一国家/地区命中时：
 
-未命中群名地区语义时，只允许高确定性语言做辅助映射，例如 Thai、Vietnamese、Indonesian、Malay、Filipino、Lao、Khmer、Burmese。
+- 东亚与东南亚按自身国家/地区输出，例如 `JP`、`KR`、`TW`、`TH`、`VN`、`ID`、`MY`、`SG`、`PH`。
+- `Middle East`、`Central Asia`、`South Asia`、`North America`、`LATAM`、`Africa`、`EUR`、`Oceania` 按业务大区归并。
+- `BR` 单列；`TR`、`NL`、`DE`、`FR`、`IT`、`PL`、`RU` 单列。
 
-English、Spanish、Chinese、Arabic、French、Portuguese、Mixed 等语言只作为语言展示，不得单独强制映射国家地区。
+多个国家/地区同时命中时：
+
+- 如果所有命中项属于同一个业务大区，则输出对应大区。例如 `MY + SG`、`TH + VN`、`ID + PH` 输出 `SEA`；`HK + TW` 输出 `EA`；`DE + FR` 输出 `EUR`。
+- 如果命中项跨业务大区，则视为 `keyword_conflict` 并留空。例如 `UAE + PH`、`US + BR`、`JP + TH` 不强行归并。
+- 同大区折叠时，`__region_source` 输出 `country_keyword_same_business_region` 或 `region_keyword_same_business_region`，`__region_keyword_hits` 保留原始命中详情。
+
+未命中群名地区语义时，仅允许高确定性语言辅助映射：Thai -> `TH`、Vietnamese -> `VN`、Indonesian -> `ID`、Malay -> `MY`、Filipino -> `PH`、Lao -> `LA`、Khmer -> `KH`、Burmese -> `MM`、Arabic/Persian -> `Middle East`。
+
+English、Spanish、Chinese、French、Portuguese、Mixed 等语言只作为语言展示，不得单独强制映射国家地区。Arabic / Persian 只在国家未知时辅助归入 `Middle East`；若明确识别到非洲国家，则优先输出 `Africa`，Egypt 例外归入 `Middle East`。
 
 ## 输出
 
-V3.6.7 不再保存 CSV。第二轮输出如下，完整 Excel 报告生成后默认自动关闭 Chrome：
+V4.0.0 不再保存 CSV。第二轮输出如下，完整 Excel 报告生成后默认自动关闭 Chrome：
 
 - `fb_monitoring_filtered.xlsx`
 - `fb_monitoring_filtered_summary.json`

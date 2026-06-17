@@ -336,6 +336,13 @@
     }
   },
   "direct_region_keywords": {
+    "EA": [
+      "east asia",
+      "eastern asia",
+      "east asian",
+      "东亚",
+      "東亞"
+    ],
     "SEA": [
       "southeast asia",
       "south east asia",
