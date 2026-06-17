@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$RunDir = "",
   [int]$Tail = 80
 )

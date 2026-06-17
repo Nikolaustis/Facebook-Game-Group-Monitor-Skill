@@ -36,12 +36,15 @@
 
 ## 语言与地区
 
-- [ ] 语言优先级符合 V3.6.1：讨论区前五条玩家发言优先，群名辅助，about 仅在存在用户手写非 UI 内容时低优先级兜底。
+- [ ] 语言优先级符合规则：讨论区前五条玩家发言优先，群名辅助，about 仅在存在用户手写非 UI 内容时低优先级兜底。
 - [ ] 非公开小组、about 无手写描述、讨论区无正文/极短正文时，不得把 Facebook 中文结构文案、按钮、时间、互动统计、评论入口识别成 `Chinese`。
 - [ ] 拉丁语系群组不应因为英文游戏词被误判为 `English`。
-- [ ] 地区优先来自群组名称中的明确地区语义。
-- [ ] 不得从 about 整页文本、Facebook UI 文案或泛文本中推断 `US` / `UK`。
-- [ ] English / Spanish / Chinese / Arabic / French / Portuguese / Mixed 只作为语言展示，不得单独映射成国家地区。
+- [ ] 地区优先来自群组名称中的明确国家/地区/属地/大区语义。
+- [ ] `region` 已按业务规则归并：Middle East、Central Asia、South Asia、North America、LATAM、Africa、EUR、Oceania 等不再拆成过多国家。
+- [ ] 东亚与东南亚具体国家/地区仍按自身输出；只有明确覆盖整个 SEA / ASEAN 时才输出 `SEA`。
+- [ ] Brazil 输出 `BR`；Turkey、Netherlands、Germany、France、Italy、Poland、Russia 分别输出 `TR`、`NL`、`DE`、`FR`、`IT`、`PL`、`RU`。
+- [ ] 明确非洲国家优先输出 `Africa`；Arabic / Persian 只在国家未知时辅助输出 `Middle East`。
+- [ ] English / Spanish / Chinese / French / Portuguese / Mixed 只作为语言展示，不得单独映射成国家地区。
 
 ## 相关性
 

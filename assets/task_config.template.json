@@ -26,25 +26,75 @@
   "language_to_region": {
     "Thai": "TH",
     "Vietnamese": "VN",
+    "Indonesian": "ID",
+    "Malay": "MY",
+    "Filipino": "PH",
+    "Lao": "LA",
+    "Khmer": "KH",
+    "Burmese": "MM",
+    "Arabic": "Middle East",
+    "Persian": "Middle East",
     "Chinese": "",
     "English": "",
     "Spanish": "",
     "Portuguese": "",
-    "Indonesian": "ID",
-    "Malay": "MY",
-    "Filipino": "PH",
     "Japanese": "",
     "Korean": "",
     "French": "",
     "German": "",
     "Russian": "",
-    "Arabic": "",
     "Turkish": "",
     "Hindi": "",
     "Mixed": "",
     "Unknown": ""
   },
   "region_keywords": {
+    "CN": [
+      "cn",
+      "china",
+      "mainland china",
+      "中国大陆",
+      "中国"
+    ],
+    "HK": [
+      "hk",
+      "hong kong",
+      "香港"
+    ],
+    "MO": [
+      "mo",
+      "macau",
+      "macao",
+      "澳门",
+      "澳門"
+    ],
+    "TW": [
+      "tw",
+      "taiwan",
+      "台湾",
+      "台灣"
+    ],
+    "JP": [
+      "jp",
+      "japan",
+      "japanese",
+      "日本"
+    ],
+    "KR": [
+      "kr",
+      "south korea",
+      "korean",
+      "한국"
+    ],
+    "KP": [
+      "kp",
+      "north korea",
+      "dprk"
+    ],
+    "MN": [
+      "mn",
+      "mongolia"
+    ],
     "TH": [
       "th",
       "thai",
@@ -68,103 +118,199 @@
       "indonesia"
     ],
     "MY": [
-      "malaysia"
+      "malaysia",
+      "malay"
     ],
     "SG": [
       "sg",
       "singapore"
     ],
-    "LATAM": [
-      "latam",
-      "latham",
-      "latin america",
-      "latinoamerica",
-      "latinoamérica",
-      "america latina",
-      "américa latina"
+    "BN": [
+      "brunei"
     ],
-    "MX": [
+    "LA": [
+      "laos",
+      "lao"
+    ],
+    "KH": [
+      "cambodia",
+      "khmer"
+    ],
+    "MM": [
+      "myanmar",
+      "burma",
+      "burmese"
+    ],
+    "TL": [
+      "timor leste",
+      "east timor"
+    ],
+    "Middle East": [
+      "saudi arabia",
+      "ksa",
+      "saudi",
+      "uae",
+      "united arab emirates",
+      "qatar",
+      "kuwait",
+      "bahrain",
+      "oman",
+      "yemen",
+      "iraq",
+      "iran",
+      "persia",
+      "israel",
+      "jordan",
+      "lebanon",
+      "syria",
+      "palestine",
+      "egypt",
+      "middle east",
+      "mena",
+      "gcc",
+      "arabic"
+    ],
+    "Central Asia": [
+      "kazakhstan",
+      "kyrgyzstan",
+      "tajikistan",
+      "turkmenistan",
+      "uzbekistan"
+    ],
+    "South Asia": [
+      "india",
+      "bharat",
+      "pakistan",
+      "bangladesh",
+      "sri lanka",
+      "nepal",
+      "bhutan",
+      "maldives",
+      "afghanistan"
+    ],
+    "North America": [
+      "usa",
+      "u.s.",
+      "u.s.a.",
+      "united states",
+      "canada",
+      "greenland"
+    ],
+    "LATAM": [
       "mexico",
       "méxico",
-      "mexicano",
-      "mexicana"
-    ],
-    "ES": [
-      "spain",
-      "espana"
-    ],
-    "AR": [
-      "argentina"
-    ],
-    "CL": [
-      "chile"
-    ],
-    "CO": [
-      "colombia"
-    ],
-    "PE": [
-      "peru"
+      "argentina",
+      "chile",
+      "colombia",
+      "peru",
+      "uruguay",
+      "paraguay",
+      "bolivia",
+      "ecuador",
+      "venezuela",
+      "puerto rico",
+      "us virgin islands",
+      "guadeloupe",
+      "martinique",
+      "french guiana",
+      "aruba",
+      "curaçao",
+      "curacao"
     ],
     "BR": [
       "br",
       "brasil",
       "brazil"
     ],
-    "US": [
-      "usa",
-      "u.s.",
-      "u.s.a.",
-      "united states"
-    ],
-    "CA": [
-      "canada"
-    ],
-    "UK": [
-      "uk",
-      "u.k.",
-      "united kingdom"
-    ],
-    "AU": [
-      "australia"
-    ],
-    "JP": [
-      "jp",
-      "japan"
-    ],
-    "KR": [
-      "kr",
-      "korea",
-      "korean"
-    ],
-    "TW": [
-      "tw",
-      "taiwan"
-    ],
-    "HK": [
-      "hk",
-      "hong kong"
-    ],
-    "CN": [
-      "cn",
-      "china"
-    ],
-    "IN": [
-      "india",
-      "bharat"
-    ],
-    "RU": [
-      "russia"
+    "Africa": [
+      "south africa",
+      "nigeria",
+      "kenya",
+      "ghana",
+      "ethiopia",
+      "morocco",
+      "algeria",
+      "tunisia",
+      "sudan",
+      "libya"
     ],
     "TR": [
       "turkey",
-      "turkiye"
+      "turkiye",
+      "türkiye",
+      "turkish"
+    ],
+    "NL": [
+      "netherlands",
+      "holland",
+      "dutch",
+      "nederland"
     ],
     "DE": [
       "germany",
-      "deutschland"
+      "deutschland",
+      "german",
+      "deutsch"
     ],
     "FR": [
-      "france"
+      "france",
+      "french",
+      "français",
+      "francais"
+    ],
+    "IT": [
+      "italy",
+      "italia",
+      "italian",
+      "italiano"
+    ],
+    "PL": [
+      "poland",
+      "polska",
+      "polish",
+      "polski"
+    ],
+    "RU": [
+      "russia",
+      "russian"
+    ],
+    "EUR": [
+      "united kingdom",
+      "uk",
+      "spain",
+      "portugal",
+      "sweden",
+      "norway",
+      "finland",
+      "denmark",
+      "belgium",
+      "switzerland",
+      "austria",
+      "greece",
+      "ukraine",
+      "georgia",
+      "armenia",
+      "azerbaijan",
+      "cyprus"
+    ],
+    "Oceania": [
+      "australia",
+      "new zealand",
+      "papua new guinea",
+      "fiji",
+      "samoa",
+      "tonga",
+      "vanuatu",
+      "solomon islands",
+      "micronesia",
+      "palau",
+      "marshall islands",
+      "kiribati",
+      "nauru",
+      "tuvalu",
+      "guam",
+      "new caledonia",
+      "french polynesia"
     ]
   },
   "cdp_url": "http://127.0.0.1:9222",
@@ -188,5 +334,59 @@
         "https://www.facebook.com/groups/allstarshinobi"
       ]
     }
+  },
+  "direct_region_keywords": {
+    "SEA": [
+      "southeast asia",
+      "south east asia",
+      "south-east asia",
+      "asean",
+      "s.e.a.",
+      "sea server",
+      "sea players",
+      "sea region"
+    ],
+    "Middle East": [
+      "middle east",
+      "mena",
+      "gcc",
+      "gulf countries",
+      "arab countries",
+      "arab world",
+      "arabic"
+    ],
+    "Central Asia": [
+      "central asia",
+      "central asian"
+    ],
+    "South Asia": [
+      "south asia",
+      "south asian"
+    ],
+    "North America": [
+      "north america",
+      "north american"
+    ],
+    "LATAM": [
+      "latam",
+      "latin america",
+      "latinoamerica",
+      "latinoamérica",
+      "america latina",
+      "américa latina"
+    ],
+    "Africa": [
+      "africa",
+      "african"
+    ],
+    "EUR": [
+      "europe",
+      "european",
+      "eur"
+    ],
+    "Oceania": [
+      "oceania",
+      "pacific islands"
+    ]
   }
 }

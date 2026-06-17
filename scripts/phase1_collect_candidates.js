@@ -110,6 +110,26 @@ function loadConfig(configFile) {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
+function loadGamesFromFile(gamesFile) {
+  if (!gamesFile) return [];
+  const p = path.resolve(gamesFile);
+  const raw = fs.readFileSync(p, 'utf8');
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (_err) {
+    return raw
+      .split(/\r?\n/)
+      .map((s) => clean(s))
+      .filter(Boolean);
+  }
+  const list = Array.isArray(parsed) ? parsed : parsed && parsed.games;
+  if (!Array.isArray(list)) {
+    throw new Error(`Games file must be a JSON array or an object with a games array: ${p}`);
+  }
+  return list.map((s) => clean(String(s))).filter(Boolean);
+}
+
 function getTitleOverride(config, gameName) {
   const overrides = config.title_variant_overrides && typeof config.title_variant_overrides === 'object'
     ? config.title_variant_overrides
@@ -429,14 +449,16 @@ async function runOneGame(page, gameName, maxMinutes, config, progressState) {
 
 (async () => {
   const args = parseArgs(process.argv.slice(2));
-  const gamesRaw = args.games || '';
-  const games = gamesRaw
-    .split(',')
-    .map((s) => clean(s))
-    .filter(Boolean);
+  const games = args['games-file']
+    ? loadGamesFromFile(args['games-file'])
+    : (args.games || '')
+      .split(',')
+      .map((s) => clean(s))
+      .filter(Boolean);
 
   if (!games.length) {
     console.error('Usage: node phase1_collect_candidates.js --games "LINE Rangers,sealm on cross" --out-dir "./runs/xxx" --config "./task_config.json"');
+    console.error('   or: node phase1_collect_candidates.js --games-file "./games.json" --out-dir "./runs/xxx" --config "./task_config.json"');
     process.exit(1);
   }
 

@@ -1,4 +1,4 @@
-param(
+﻿param(
   [int]$SailorPid = 25944,
   [string]$SailorXlsx = "C:\Work\Crawler\fb-group-monitor-skill-v2\fb-group-monitor-skill-v2\runs\seal_cross_sailor_piece_phase1_20260525_1812\fb_monitoring_filtered.xlsx",
   [string]$PokemonIndex = "C:\Work\Crawler\fb-group-monitor-skill-v2\fb-group-monitor-skill-v2\output\pokemon_go_phase1_20260525_rerun\phase1_index.json",

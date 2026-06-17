@@ -1,4 +1,4 @@
-param(
+﻿param(
   [int]$WaitPid = 12532,
   [string]$CurrentRunDir = "runs\one_piece_bounty_fighting_20260521_160359",
   [string]$Cdp = "http://127.0.0.1:9222"

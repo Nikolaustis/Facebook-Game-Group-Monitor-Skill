@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)]
   [ValidateSet("login", "validate-login", "phase1", "phase2", "monitor")]
   [string]$Task,

@@ -199,6 +199,7 @@ const DEFAULT_LANGUAGE_KEYWORDS = {
   German: ['deutsch', 'german', 'deutschland'],
   Russian: ['russian', 'russia'],
   Arabic: ['arabic'],
+  Persian: ['persian', 'farsi'],
   Turkish: ['turkish', 'turkey', 'turkiye'],
   Hindi: ['hindi', 'india'],
   English: ['english', 'global', 'international', 'worldwide'],
@@ -220,6 +221,7 @@ const EXTRA_LANGUAGE_KEYWORDS = {
   Lao: ['lao', 'laos'],
   Khmer: ['khmer', 'cambodia'],
   Burmese: ['burmese', 'myanmar'],
+  Persian: ['farsi', 'iranian', 'persian'],
   English: ['community', 'players', 'buy', 'sell', 'trade', 'account', 'accounts', 'guide', 'tips'],
 };
 
@@ -255,7 +257,11 @@ const SCRIPT_LANGUAGE_PATTERNS = {
   Burmese: /[\u1000-\u109F]/g,
 };
 
+
 const DEFAULT_LANGUAGE_TO_REGION = {
+  // Language is only an auxiliary fallback when group_name has no explicit country/region signal.
+  // East Asia / Europe / LATAM / Africa are not inferred from broad languages such as Chinese,
+  // Spanish, French, Portuguese, English, etc.
   Thai: 'TH',
   Vietnamese: 'VN',
   Indonesian: 'ID',
@@ -264,53 +270,144 @@ const DEFAULT_LANGUAGE_TO_REGION = {
   Lao: 'LA',
   Khmer: 'KH',
   Burmese: 'MM',
+  Arabic: 'Middle East',
+  Persian: 'Middle East',
 };
 
-const LANGUAGE_REGION_AUX_ALLOWED = new Set(['Thai', 'Vietnamese', 'Indonesian', 'Malay', 'Filipino', 'Lao', 'Khmer', 'Burmese']);
+const LANGUAGE_REGION_AUX_ALLOWED = new Set(Object.keys(DEFAULT_LANGUAGE_TO_REGION));
 
-const DEFAULT_REGION_KEYWORDS = {
-  TH: ['th', 'thai', 'thailand'],
+const LEGACY_REGION_OUTPUT_MAP = {
+  // LATAM legacy country codes
+  MX: 'LATAM', AR: 'LATAM', CL: 'LATAM', CO: 'LATAM', PE: 'LATAM', UY: 'LATAM', PY: 'LATAM', BO: 'LATAM', EC: 'LATAM', VE: 'LATAM', CR: 'LATAM', PA: 'LATAM', GT: 'LATAM', HN: 'LATAM', SV: 'LATAM', NI: 'LATAM', BZ: 'LATAM', CU: 'LATAM', DO: 'LATAM', HT: 'LATAM', JM: 'LATAM', TT: 'LATAM', PR: 'LATAM',
+  // Broad-region remaps
+  US: 'North America', USA: 'North America', CA: 'North America', GL: 'North America',
+  IN: 'South Asia', PK: 'South Asia', BD: 'South Asia', LK: 'South Asia', NP: 'South Asia', BT: 'South Asia', MV: 'South Asia', AF: 'South Asia',
+  KZ: 'Central Asia', KG: 'Central Asia', TJ: 'Central Asia', TM: 'Central Asia', UZ: 'Central Asia',
+  ME: 'Middle East', MENA: 'Middle East',
+  UK: 'EUR', GB: 'EUR', ES: 'EUR', PT: 'EUR', SE: 'EUR', NO: 'EUR', FI: 'EUR', DK: 'EUR', IE: 'EUR', BE: 'EUR', CH: 'EUR', AT: 'EUR', CZ: 'EUR', SK: 'EUR', HU: 'EUR', RO: 'EUR', BG: 'EUR', GR: 'EUR', UA: 'EUR', BY: 'EUR', GE: 'EUR', AM: 'EUR', AZ: 'EUR', CY: 'EUR',
+  AU: 'Oceania', NZ: 'Oceania', PG: 'Oceania', FJ: 'Oceania', GU: 'Oceania', NC: 'Oceania', PF: 'Oceania',
+  AFR: 'Africa', AFRC: 'Africa',
+};
+
+function normalizeRegionOutput(region) {
+  const key = clean(region);
+  if (!key) return '';
+  return LEGACY_REGION_OUTPUT_MAP[key] || key;
+}
+
+const DEFAULT_COUNTRY_REGION_KEYWORDS = {
+  // East Asia: output each country/territory itself.
+  CN: ['cn', 'china', 'mainland china', 'china mainland', '中国大陆', '中國大陸', '中国', '中國'],
+  HK: ['hk', 'hong kong', '香港'],
+  MO: ['mo', 'macau', 'macao', '澳门', '澳門'],
+  TW: ['tw', 'taiwan', '台灣', '台湾'],
+  JP: ['jp', 'japan', 'japanese', '日本'],
+  KR: ['kr', 'south korea', 'korea server', 'korean server', 'korean', '한국', '대한민국'],
+  KP: ['kp', 'north korea', 'dprk', '朝鲜', '朝鮮', '北韩', '北韓', '북한'],
+  MN: ['mn', 'mongolia', 'mongolian', 'Монгол', '蒙古'],
+
+  // Southeast Asia: output each country/territory itself unless the group explicitly covers SEA as a whole.
+  TH: ['th', 'thai', 'thailand', 'ประเทศไทย', 'ไทย'],
   VN: ['vn', 'viet nam', 'vietnam', 'việt nam'],
   PH: ['ph', 'pinoy', 'philippines', 'pilipinas'],
   ID: ['id', 'indo', 'indonesia'],
-  MY: ['malaysia'],
+  MY: ['malaysia', 'malay', 'melayu'],
+  SG: ['sg', 'singapore'],
+  BN: ['brunei'],
   LA: ['laos', 'lao'],
   KH: ['cambodia', 'khmer'],
   MM: ['myanmar', 'burma', 'burmese'],
-  SG: ['sg', 'singapore'],
-  LATAM: ['latam', 'latham', 'latin america', 'latinoamerica', 'latinoamérica', 'america latina', 'américa latina'],
-  MX: ['mexico', 'méxico', 'mexicano', 'mexicana'],
-  ES: ['spain', 'espana'],
-  AR: ['argentina'],
-  CL: ['chile'],
-  CO: ['colombia'],
-  PE: ['peru'],
-  BR: ['br', 'brasil', 'brazil'],
-  US: ['usa', 'u.s.', 'u.s.a.', 'united states'],
-  CA: ['canada'],
-  UK: ['uk', 'u.k.', 'united kingdom'],
-  AU: ['australia'],
-  JP: ['jp', 'japan'],
-  KR: ['kr', 'korea', 'korean'],
-  TW: ['tw', 'taiwan'],
-  HK: ['hk', 'hong kong'],
-  CN: ['cn', 'china', '中国', '中國'],
-  IN: ['india', 'bharat'],
-  RU: ['russia'],
-  TR: ['turkey', 'turkiye'],
-  DE: ['germany', 'deutschland'],
-  FR: ['france'],
+  TL: ['timor leste', 'east timor'],
+
+  // Middle East: countries are unified as Middle East. Turkey is intentionally excluded and kept as TR.
+  'Middle East': [
+    'saudi arabia', 'ksa', 'saudi', 'السعودية',
+    'uae', 'u.a.e.', 'united arab emirates', 'emirates', 'dubai', 'abu dhabi', 'الإمارات',
+    'qatar', 'قطر', 'kuwait', 'الكويت', 'bahrain', 'البحرين', 'oman', 'عمان', 'yemen', 'اليمن',
+    'iraq', 'العراق', 'iran', 'persia', 'persian', 'ایران', 'ايران',
+    'israel', 'إسرائيل', 'اسرائيل', 'jordan', 'الأردن', 'lebanon', 'لبنان',
+    'syria', 'سوريا', 'palestine', 'palestinian', 'فلسطين', 'egypt', 'مصر'
+  ],
+
+  // Central Asia.
+  'Central Asia': ['kazakhstan', 'kazakh', 'kz', 'қазақстан', 'киргизстан', 'kyrgyzstan', 'kyrgyz', 'kg', 'tajikistan', 'tajik', 'tj', 'turkmenistan', 'turkmen', 'tm', 'uzbekistan', 'uzbek', 'uz'],
+
+  // South Asia.
+  'South Asia': ['india', 'bharat', 'pakistan', 'bangladesh', 'sri lanka', 'nepal', 'bhutan', 'maldives', 'afghanistan'],
+
+  // North America.
+  'North America': ['usa', 'u.s.', 'u.s.a.', 'united states', 'canada', 'greenland'],
+
+  // LATAM: all Americas except US / Canada / Greenland / Brazil; includes listed territories.
+  LATAM: [
+    'mexico', 'méxico', 'mexicano', 'mexicana', 'argentina', 'chile', 'colombia', 'peru', 'perú', 'uruguay', 'paraguay', 'bolivia', 'ecuador', 'venezuela',
+    'costa rica', 'panama', 'panamá', 'guatemala', 'honduras', 'el salvador', 'nicaragua', 'belize',
+    'cuba', 'dominican republic', 'república dominicana', 'haiti', 'haití', 'jamaica', 'trinidad', 'tobago',
+    'puerto rico', 'boricua', 'us virgin islands', 'u.s. virgin islands', 'virgin islands', 'guadeloupe', 'martinique', 'french guiana', 'guyane', 'aruba', 'curaçao', 'curacao',
+    'latino', 'latinos', 'hispano', 'hispanos'
+  ],
+
+  // Brazil remains separate.
+  BR: ['br', 'brasil', 'brazil', 'brasileiro', 'brasileira'],
+
+  // Africa: Egypt is intentionally excluded and handled as Middle East above.
+  Africa: [
+    'south africa', 'nigeria', 'kenya', 'ghana', 'ethiopia', 'tanzania', 'uganda', 'rwanda', 'burundi', 'somalia', 'djibouti', 'eritrea',
+    'sudan', 'south sudan', 'libya', 'algeria', 'الجزائر', 'morocco', 'المغرب', 'tunisia', 'تونس', 'mauritania',
+    'senegal', 'gambia', 'guinea', 'guinea bissau', 'sierra leone', 'liberia', 'ivory coast', 'cote d ivoire', "côte d'ivoire", 'mali', 'burkina faso', 'niger', 'chad',
+    'cameroon', 'central african republic', 'equatorial guinea', 'gabon', 'congo', 'dr congo', 'drc', 'democratic republic of congo',
+    'angola', 'zambia', 'zimbabwe', 'mozambique', 'malawi', 'botswana', 'namibia', 'lesotho', 'eswatini', 'swaziland',
+    'madagascar', 'mauritius', 'seychelles', 'comoros', 'cape verde', 'cabo verde', 'sao tome', 'são tomé'
+  ],
+
+  // Europe: Turkey / Netherlands / Germany / France / Italy / Poland / Russia are kept separate.
+  TR: ['turkey', 'turkiye', 'türkiye', 'turkish', 'türk', 'turkce'],
+  NL: ['netherlands', 'holland', 'dutch', 'nederland'],
+  DE: ['germany', 'deutschland', 'german', 'deutsch'],
+  FR: ['france', 'french', 'français', 'francais'],
+  IT: ['italy', 'italia', 'italian', 'italiano'],
+  PL: ['poland', 'polska', 'polish', 'polski'],
+  RU: ['russia', 'russian', 'россия', 'русский'],
+  EUR: [
+    'united kingdom', 'uk', 'u.k.', 'great britain', 'britain', 'england', 'scotland', 'wales', 'ireland',
+    'spain', 'espana', 'españa', 'portugal', 'sweden', 'norway', 'finland', 'denmark', 'iceland',
+    'belgium', 'belgie', 'belgië', 'switzerland', 'austria', 'czech republic', 'czechia', 'slovakia', 'hungary', 'romania', 'bulgaria', 'greece',
+    'ukraine', 'belarus', 'lithuania', 'latvia', 'estonia', 'slovenia', 'croatia', 'serbia', 'bosnia', 'montenegro', 'albania', 'kosovo', 'north macedonia', 'moldova', 'malta',
+    'georgia', 'armenia', 'azerbaijan', 'cyprus'
+  ],
+
+  // Oceania.
+  Oceania: [
+    'australia', 'new zealand', 'papua new guinea', 'png', 'fiji', 'samoa', 'tonga', 'vanuatu', 'solomon islands',
+    'micronesia', 'palau', 'marshall islands', 'kiribati', 'nauru', 'tuvalu', 'guam', 'new caledonia', 'french polynesia', 'tahiti'
+  ],
+};
+
+const DEFAULT_DIRECT_REGION_KEYWORDS = {
+  SEA: ['southeast asia', 'south east asia', 'south-east asia', 'asean', 's.e.a.', 'sea server', 'sea players', 'sea region'],
+  'Middle East': ['middle east', 'mena', 'gcc', 'gulf countries', 'arab countries', 'arab world', 'arabic'],
+  'Central Asia': ['central asia', 'central asian'],
+  'South Asia': ['south asia', 'south asian'],
+  'North America': ['north america', 'north american'],
+  LATAM: ['latam', 'latin america', 'latinoamerica', 'latinoamérica', 'america latina', 'américa latina'],
+  Africa: ['africa', 'african'],
+  EUR: ['europe', 'european', 'eur'],
+  Oceania: ['oceania', 'pacific islands'],
 };
 
 function mergeKeywordMap(base, override) {
   const out = {};
   for (const [key, vals] of Object.entries(base || {})) {
-    out[key] = Array.isArray(vals) ? [...vals] : [];
+    const mappedKey = normalizeRegionOutput(key);
+    if (!mappedKey) continue;
+    out[mappedKey] = unique([...(out[mappedKey] || []), ...(Array.isArray(vals) ? vals : []).map((x) => clean(x)).filter(Boolean)]);
   }
   if (override && typeof override === 'object') {
     for (const [key, vals] of Object.entries(override)) {
+      const mappedKey = normalizeRegionOutput(key);
+      if (!mappedKey) continue;
       const list = Array.isArray(vals) ? vals : [];
-      out[key] = unique([...(out[key] || []), ...list.map((x) => clean(x)).filter(Boolean)]);
+      out[mappedKey] = unique([...(out[mappedKey] || []), ...list.map((x) => clean(x)).filter(Boolean)]);
     }
   }
   return out;
@@ -617,7 +714,8 @@ function phraseMatchesText(keyword, compactText, normText) {
   return false;
 }
 
-function detectRegionByGroupName(groupName, regionKeywords) {
+
+function detectRegionByKeywordMap(groupName, regionKeywords, source) {
   if (!regionKeywords || typeof regionKeywords !== 'object') {
     return { region: '', source: '', keyword_hits: [] };
   }
@@ -628,18 +726,19 @@ function detectRegionByGroupName(groupName, regionKeywords) {
   const hits = [];
 
   for (const [region, keywords] of Object.entries(regionKeywords)) {
+    const mappedRegion = normalizeRegionOutput(region);
     const list = Array.isArray(keywords) ? keywords : [];
     for (const keyword of list) {
       if (!clean(keyword)) continue;
       if (!phraseMatchesText(keyword, compactText, normText)) continue;
-      hits.push({ region: clean(region), keyword: clean(keyword) });
+      hits.push({ region: mappedRegion, keyword: clean(keyword) });
       break;
     }
   }
 
   const matchedRegions = unique(hits.map((x) => x.region).filter(Boolean));
   if (matchedRegions.length === 1) {
-    return { region: matchedRegions[0], source: 'keyword', keyword_hits: hits };
+    return { region: matchedRegions[0], source, keyword_hits: hits };
   }
   if (matchedRegions.length > 1) {
     return { region: '', source: 'keyword_conflict', keyword_hits: hits };
@@ -647,9 +746,23 @@ function detectRegionByGroupName(groupName, regionKeywords) {
   return { region: '', source: '', keyword_hits: [] };
 }
 
+function detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords) {
+  // First identify explicit countries/territories; then normalize to the required region output.
+  // Direct broad-region labels are only used when no country/territory was found.
+  const countryMatch = detectRegionByKeywordMap(groupName, countryRegionKeywords, 'country_keyword');
+  if (countryMatch.source === 'country_keyword' && countryMatch.region) return countryMatch;
+  if (countryMatch.source === 'keyword_conflict') return countryMatch;
+
+  const directRegionMatch = detectRegionByKeywordMap(groupName, directRegionKeywords, 'region_keyword');
+  if (directRegionMatch.source === 'region_keyword' && directRegionMatch.region) return directRegionMatch;
+  if (directRegionMatch.source === 'keyword_conflict') return directRegionMatch;
+
+  return { region: '', source: '', keyword_hits: [] };
+}
+
 function mapRegion(languageSignal, languageToRegion, regionKeywordMatch) {
-  if (regionKeywordMatch?.source === 'keyword' && regionKeywordMatch.region) {
-    return regionKeywordMatch.region;
+  if (regionKeywordMatch?.source && regionKeywordMatch.source !== 'keyword_conflict' && regionKeywordMatch.region) {
+    return normalizeRegionOutput(regionKeywordMatch.region);
   }
   if (regionKeywordMatch?.source === 'keyword_conflict') {
     return '';
@@ -658,9 +771,9 @@ function mapRegion(languageSignal, languageToRegion, regionKeywordMatch) {
     return '';
   }
   if (languageToRegion && Object.prototype.hasOwnProperty.call(languageToRegion, languageSignal)) {
-    return clean(languageToRegion[languageSignal] || '');
+    return normalizeRegionOutput(languageToRegion[languageSignal] || '');
   }
-  return defaultLanguageToRegion(languageSignal);
+  return normalizeRegionOutput(defaultLanguageToRegion(languageSignal));
 }
 
 function normalizeCompact(s) {
@@ -1405,9 +1518,9 @@ function writeWorkbookAtomic(file, wb) {
   }
 }
 
-function writePlainXlsx(file, rows, fields, sheetName = 'verified_partial') {
+function writePlainXlsx(file, rows, fields, sheetName = 'verified_partial', formulaFields = null) {
   const wb = XLSX.utils.book_new();
-  const ws = buildPlainSheet(rows, fields);
+  const ws = formulaFields ? buildDetailSheet(rows, fields, formulaFields) : buildPlainSheet(rows, fields);
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
   writeWorkbookAtomic(file, wb);
 }
@@ -1561,12 +1674,13 @@ function resolveCollisions(rows) {
     ...DEFAULT_LANGUAGE_TO_REGION,
     ...(config.language_to_region && typeof config.language_to_region === 'object' ? config.language_to_region : {}),
   };
-  const regionKeywords = mergeKeywordMap(DEFAULT_REGION_KEYWORDS, config.region_keywords);
+  const regionKeywords = mergeKeywordMap(DEFAULT_COUNTRY_REGION_KEYWORDS, config.region_keywords || config.country_region_keywords);
+  const directRegionKeywords = mergeKeywordMap(DEFAULT_DIRECT_REGION_KEYWORDS, config.direct_region_keywords);
   const allowedLanguageSignals = Array.isArray(config.allowed_language_signals)
     ? new Set(config.allowed_language_signals.map((x) => clean(x)).filter(Boolean))
     : null;
   const allowedRegions = Array.isArray(config.allowed_regions)
-    ? new Set(config.allowed_regions.map((x) => clean(x)).filter(Boolean))
+    ? new Set(config.allowed_regions.map((x) => normalizeRegionOutput(x)).filter(Boolean))
     : null;
 
   const index = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
@@ -1716,13 +1830,13 @@ function resolveCollisions(rows) {
 
     const makePartialRows = () => {
       const outputSnapshotDate = normalizeSnapshotDate(snapshotDate || config.snapshot_date, new Date().toISOString().slice(0, 10));
-      return stagedRows.map((row) => ({
+      return stagedRows.map((row, idx) => ({
         ...row,
         snapshot_date: outputSnapshotDate,
         group_id: String(row.group_id || ''),
         language: row.language_signal || '',
-        [formulaFields.activeIndex]: '',
-        [formulaFields.growthRate]: '',
+        [formulaFields.activeIndex]: `=IFERROR(I${idx + 2}/H${idx + 2},"")`,
+        [formulaFields.growthRate]: `=IFERROR(J${idx + 2}/(H${idx + 2}-J${idx + 2}),"")`,
       }));
     };
 
@@ -1809,7 +1923,7 @@ function resolveCollisions(rows) {
       if (shouldWriteXlsx) {
         try {
           // The workbook is saved immediately when a row passes all filters. Rejected candidates only touch JSON.
-          writePlainXlsx(outPartialXlsx, partialRows, fields);
+          writePlainXlsx(outPartialXlsx, partialRows, fields, 'verified_partial', formulaFields);
         } catch (err) {
           // If the workbook is open in Excel, keep JSON autosave intact and record the workbook write failure.
           atomicWriteText(outCheckpointError, `[${now}] failed to write ${outPartialXlsx}\n${err && err.stack ? err.stack : err}\n`, 'utf8');
@@ -1916,7 +2030,7 @@ function resolveCollisions(rows) {
         const match = matchGame(profile, candidateGroupName, aboutText, c.snippet);
         const thresholdSpec = thresholdSpecForMatch(match, threshold);
         let languageSignal = detectLanguageSignalFromEvidence(candidateGroupName, aboutLanguageText, '', '');
-        const regionKeywordMatch = detectRegionByGroupName(candidateGroupName, regionKeywords);
+        const regionKeywordMatch = detectRegionByGroupName(candidateGroupName, regionKeywords, directRegionKeywords);
         let region = mapRegion(languageSignal, languageToRegion, regionKeywordMatch);
 
         const row = {
@@ -2042,7 +2156,7 @@ function resolveCollisions(rows) {
       }
 
       stats.game_breakdown[gameName] = one;
-      writePartialCheckpoint({ stage: 'game_finished' }, { writeFullState: true });
+      writePartialCheckpoint({ stage: 'game_finished' }, { writeXlsx: true, writeFullState: true });
       if (codexProgressReporter) codexProgressReporter.writeSnapshot('game_finished');
     }
 

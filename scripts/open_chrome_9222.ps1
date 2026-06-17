@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$Cdp = "http://127.0.0.1:9222",
   [string]$UserDataDir = "C:\temp\chrome-cdp"
 )
