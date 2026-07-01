@@ -1,9 +1,9 @@
 ---
-name: fb-group-monitor-v4.0.0
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V4.0.0 支持 Codex 后台启动登录态验证、第一轮抓取和第二轮抓取，启动后应立即把控制权还给用户；第二轮默认每 30 分钟写入/输出 Codex 进度汇报；最终 Excel 报告生成后自动关闭 Chrome；只有用户明确要求时才可在完成后自动关机。
+name: fb-group-monitor-v4.1.0
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V4.1.0 支持 Codex 后台启动登录态验证、第一轮抓取和第二轮抓取，启动后应立即把控制权还给用户；第二轮默认每 30 分钟写入/输出 Codex 进度汇报；最终 Excel 报告生成后自动关闭 Chrome；只有用户明确要求时才可在完成后自动关机。
 ---
 
-# Facebook Group Monitor V4.0.0
+# Facebook Group Monitor V4.1.0
 
 ## 必须先读
 
@@ -151,7 +151,7 @@ source_query, query_variant_type, source_game_name, source_is_seed_url, source_q
 
 ## 地区判断
 
-V4.0.0 的 `region` 采用“具体国家/地区/属地识别 -> 业务区域归并输出 -> 同大区多命中折叠”的三层规则。
+V4.1.0 的 `region` 采用“具体国家/地区/属地识别 -> 业务区域归并输出 -> 同大区多命中折叠”的三层规则。
 
 单一国家/地区命中时：
 
@@ -167,11 +167,13 @@ V4.0.0 的 `region` 采用“具体国家/地区/属地识别 -> 业务区域归
 
 未命中群名地区语义时，仅允许高确定性语言辅助映射：Thai -> `TH`、Vietnamese -> `VN`、Indonesian -> `ID`、Malay -> `MY`、Filipino -> `PH`、Lao -> `LA`、Khmer -> `KH`、Burmese -> `MM`、Arabic/Persian -> `Middle East`。
 
+若上述链路仍无法确定地区，才读取群组 About 页中明确标注的“所在地 / Location”字段作为最终兜底：先识别所在地文本中的国家/地区，其次识别已配置的高确定性城市；城市会映射至对应国家或业务大区。该字段不得覆盖已由群名或允许的语言映射得到的结果。`__region_source` 将输出 `about_location_country_keyword`、`about_location_city_keyword` 或 `about_location_region_keyword`，`__region_location` 保留原始所在地文本以供审计。
+
 English、Spanish、Chinese、French、Portuguese、Mixed 等语言只作为语言展示，不得单独强制映射国家地区。Arabic / Persian 只在国家未知时辅助归入 `Middle East`；若明确识别到非洲国家，则优先输出 `Africa`，Egypt 例外归入 `Middle East`。
 
 ## 输出
 
-V4.0.0 不再保存 CSV。第二轮输出如下，完整 Excel 报告生成后默认自动关闭 Chrome：
+V4.1.0 不再保存 CSV。第二轮输出如下，完整 Excel 报告生成后默认自动关闭 Chrome：
 
 - `fb_monitoring_filtered.xlsx`
 - `fb_monitoring_filtered_summary.json`

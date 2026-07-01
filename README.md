@@ -1,8 +1,8 @@
-# FB Game Group Monitor Skill V4.0.0
+# FB Game Group Monitor Skill V4.1.0
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V4.0.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V4.1.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发。
 
 ## 核心能力
 
@@ -17,6 +17,7 @@
 - 语言判断以讨论区前五条可见玩家发言为主，群组名称为辅助。
 - “关于这个小组”只在存在用户手写的非 UI 内容时作为最低优先级兜底。
 - 地区判断优先看群组名称中的明确地区语义，并按业务区域归并；同一业务大区内的多国家/地区组合会输出该大区，例如 `MY + SG` -> `SEA`。
+- 当群名与允许的语言兜底仍无法确定地区时，读取 About 页中明确标注的“所在地 / Location”字段；国家/地区优先，已配置的高确定性城市次之。
 - Excel 输出固定列顺序，`snapshot_date` 和 `group_id` 强制文本格式，活跃指数/规模增速为百分比公式。
 - 后台启动后会立即返回 PID 与日志路径；第二轮默认每 30 分钟输出一次 `codex_progress_report`，并刷新 `codex_progress_report.json`。
 - 可选“完成后关机”：默认不启用，只有命令加入 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true` 后，才会在最终报表生成并关闭 Chrome 后执行 Windows 关机。
@@ -173,7 +174,8 @@ Excel 格式规则：
 2. 若命中多个国家/地区，但都属于同一业务大区，则输出该大区。例如 `MY + SG`、`TH + VN` 输出 `SEA`；`HK + TW` 输出 `EA`；`DE + FR` 输出 `EUR`。
 3. 若命中多个跨业务大区信号，则视为地区冲突并留空。例如 `UAE + PH`、`US + BR`、`JP + TH`。
 4. 未命中群名地区语义时，才使用高确定性语言辅助映射，例如 Thai -> TH、Vietnamese -> VN、Indonesian -> ID、Malay -> MY、Filipino -> PH、Arabic/Persian -> Middle East。
-5. 无法确定时留空。
+5. 若前四步仍无法确定，才从 About 页中明确标注的“所在地 / Location”字段推断地区：先识别国家/地区，再识别 `about_location_city_keywords` 中配置的高确定性城市；该兜底不得覆盖前述已得到的地区结果。
+6. 无法确定时留空。
 
 单一国家/地区命中时，东亚与东南亚仍按自身输出；Middle East、Central Asia、South Asia、North America、LATAM、Africa、EUR、Oceania 按业务大区归并；BR 单列；TR、NL、DE、FR、IT、PL、RU 单列。
 

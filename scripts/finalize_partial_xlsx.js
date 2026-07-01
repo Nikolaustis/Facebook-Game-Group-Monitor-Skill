@@ -167,6 +167,7 @@ const fields = [
   'risk_level',
   '__region_source',
   '__region_keyword_hits',
+  '__region_location',
 ];
 
 let sourceKind = 'partial_xlsx';

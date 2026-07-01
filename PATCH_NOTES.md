@@ -1,3 +1,29 @@
+# V4.1.0 补丁说明：About 所在地末级地区兜底
+
+本次补丁在既有 V4.0.0 地区规则后新增一个**末级兜底**：当群组名称中的国家/地区/大区语义、同业务大区归并以及允许的语言映射都无法确定 `region` 时，第二阶段会从已打开的 About 页面中解析明确标注的“所在地 / Location”字段。
+
+- 先识别所在地文本中的国家/地区或大区。
+- 国家/地区未命中时，再识别 `about_location_city_keywords` 中的高确定性城市，并映射到既有地区输出规则。
+- 此规则不会覆盖已由群组名称或允许语言映射得到的地区。
+- 若群名存在跨业务大区冲突而无法归类，About 所在地可作为最终可信位置证据解决冲突。
+- 新增审计列：`__region_location`。`__region_source` 新增 `about_location_country_keyword`、`about_location_city_keyword`、`about_location_region_keyword`；`__region_keyword_hits` 会标记 `group_name:` 与 `about_location:` 证据来源。
+- `manual_review` sheet 增加 `about_location` 列。
+- 新增可配置项 `about_location_city_keywords`，用于扩展特定市场的城市映射。
+
+覆盖文件：
+
+- `scripts/phase2_collect_details.js`
+- `scripts/finalize_partial_xlsx.js`
+- `assets/task_config.template.json`
+- `package.json`
+- `SKILL.md`
+- `README.md`
+- `references/judgement_rules.md`
+- `references/xlsx_schema.md`
+- `PATCH_NOTES.md`
+
+---
+
 # Patch Notes - V4.0.0
 
 本次版本将 Skill 从 `fb-group-monitor-v3.6.7` 升级为 `fb-group-monitor-v4.0.0`，核心改动是优化 `region` 归并逻辑，解决同一业务大区下多个国家/地区同时命中时被误判为跨区冲突的问题。

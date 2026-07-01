@@ -424,6 +424,49 @@ const DEFAULT_DIRECT_REGION_KEYWORDS = {
   Oceania: ['oceania', 'pacific islands'],
 };
 
+
+// About-page location is only a final fallback. These city tokens are intentionally
+// limited to high-confidence, globally recognizable cities; ambiguous names such as
+// "Victoria", "San Jose", "Springfield" and "Alexandria" are excluded.
+const DEFAULT_ABOUT_LOCATION_CITY_KEYWORDS = {
+  CN: ['beijing', '北京', 'shanghai', '上海', 'guangzhou', '广州', 'shenzhen', '深圳', 'chengdu', '成都', 'wuhan', '武汉', 'hangzhou', '杭州', 'nanjing', '南京', 'chongqing', '重庆'],
+  HK: ['hong kong', '香港'],
+  MO: ['macau', 'macao', '澳门', '澳門'],
+  TW: ['taipei', '台北', '臺北', 'kaohsiung', '高雄', 'taichung', '台中', '臺中'],
+  JP: ['tokyo', '東京', 'osaka', '大阪', 'yokohama', '横滨', '橫濱', 'nagoya', '名古屋', 'sapporo', '札幌', 'fukuoka', '福岡'],
+  KR: ['seoul', '서울', 'busan', '부산', 'incheon', '인천', 'daegu', '대구'],
+  MN: ['ulaanbaatar', 'ulan bator', 'улаанбаатар'],
+
+  TH: ['bangkok', 'กรุงเทพ', 'chiang mai', 'เชียงใหม่', 'pattaya', 'พัทยา', 'phuket', 'ภูเก็ต'],
+  VN: ['hanoi', 'ha noi', 'ฮานอย', 'ho chi minh city', 'ho chi minh', 'saigon', 'sai gon', 'da nang', 'đà nẵng', 'haiphong', 'hai phong'],
+  PH: ['manila', 'quezon city', 'cebu city', 'davao city'],
+  ID: ['jakarta', 'surabaya', 'bandung', 'medan', 'makassar', 'yogyakarta'],
+  MY: ['kuala lumpur', 'johor bahru', 'george town', 'penang', 'kuching', 'kota kinabalu'],
+  SG: ['singapore'],
+  BN: ['bandar seri begawan'],
+  LA: ['vientiane'],
+  KH: ['phnom penh', 'siem reap'],
+  MM: ['yangon', 'mandalay', 'naypyidaw', 'nay pyi taw'],
+  TL: ['dili'],
+
+  'Middle East': ['riyadh', 'jeddah', 'dubai', 'abu dhabi', 'doha', 'kuwait city', 'manama', 'muscat', 'sanaa', "sana'a", 'baghdad', 'tehran', 'isfahan', 'tel aviv', 'jerusalem', 'amman', 'beirut', 'damascus', 'gaza', 'cairo'],
+  'Central Asia': ['astana', 'almaty', 'bishkek', 'dushanbe', 'ashgabat', 'tashkent'],
+  'South Asia': ['new delhi', 'mumbai', 'bangalore', 'bengaluru', 'kolkata', 'chennai', 'hyderabad', 'karachi', 'lahore', 'islamabad', 'dhaka', 'chittagong', 'colombo', 'kathmandu', 'thimphu'],
+  'North America': ['new york', 'los angeles', 'chicago', 'houston', 'toronto', 'vancouver', 'montreal', 'calgary', 'ottawa'],
+  LATAM: ['mexico city', 'guadalajara', 'monterrey', 'buenos aires', 'santiago', 'bogota', 'bogotá', 'lima', 'montevideo', 'asuncion', 'asunción', 'la paz', 'quito', 'caracas', 'san juan puerto rico'],
+  BR: ['sao paulo', 'são paulo', 'rio de janeiro', 'brasilia', 'brasília', 'belo horizonte', 'curitiba', 'recife', 'fortaleza'],
+  Africa: ['lagos', 'abuja', 'nairobi', 'accra', 'addis ababa', 'dar es salaam', 'kampala', 'kigali', 'mogadishu', 'khartoum', 'tripoli', 'algiers', 'casablanca', 'rabat', 'tunis', 'dakar', 'bamako', 'ouagadougou', 'niamey', "n'djamena", 'yaounde', 'douala', 'kinshasa', 'luanda', 'lusaka', 'harare', 'maputo', 'lilongwe', 'gaborone', 'windhoek', 'maseru', 'mbabane', 'antananarivo', 'cape town', 'johannesburg', 'pretoria'],
+  TR: ['istanbul', 'ankara', 'izmir', 'antalya', 'bursa'],
+  NL: ['amsterdam', 'rotterdam', 'the hague', 'utrecht', 'eindhoven'],
+  DE: ['berlin', 'munich', 'münchen', 'hamburg', 'frankfurt', 'cologne', 'köln', 'dusseldorf', 'düsseldorf', 'stuttgart'],
+  FR: ['paris', 'marseille', 'lyon', 'toulouse', 'lille', 'bordeaux', 'nice'],
+  IT: ['rome', 'roma', 'milan', 'milano', 'naples', 'napoli', 'turin', 'torino'],
+  PL: ['warsaw', 'warszawa', 'krakow', 'kraków', 'wroclaw', 'wrocław', 'gdansk', 'gdańsk'],
+  RU: ['moscow', 'москва', 'saint petersburg', 'st petersburg', 'санкт петербург'],
+  EUR: ['london', 'madrid', 'barcelona', 'lisbon', 'porto', 'stockholm', 'oslo', 'helsinki', 'copenhagen', 'dublin', 'brussels', 'zurich', 'vienna', 'prague', 'budapest', 'bucharest', 'sofia', 'athens', 'kyiv', 'minsk', 'vilnius', 'riga', 'tallinn', 'ljubljana', 'zagreb', 'belgrade', 'sarajevo', 'podgorica', 'tirana', 'skopje', 'chisinau', 'chișinău', 'valletta', 'tbilisi', 'yerevan', 'baku', 'nicosia'],
+  Oceania: ['sydney', 'melbourne', 'brisbane', 'perth', 'adelaide', 'auckland', 'wellington', 'port moresby', 'suva', 'apia', "nuku'alofa", 'port vila', 'honiara', 'koror', 'majuro', 'tarawa'],
+};
+
 function mergeKeywordMap(base, override) {
   const out = {};
   for (const [key, vals] of Object.entries(base || {})) {
@@ -779,6 +822,54 @@ function detectRegionByKeywordMap(groupName, regionKeywords, source) {
   return { region: '', source: '', keyword_hits: [] };
 }
 
+function phraseMatchesLocationCity(keyword, compactText, normText) {
+  const cleanKeyword = clean(keyword);
+  if (!cleanKeyword) return false;
+  const compactKeyword = normalizeCompact(cleanKeyword);
+  const normKeyword = normalizeWords(cleanKeyword).trim();
+  if (!compactKeyword && !normKeyword) return false;
+
+  // City fallback is intentionally stricter than generic group-name matching. Latin city
+  // names must match complete normalized words, so "rome" cannot match "chrome".
+  if (normKeyword && normText.includes(` ${normKeyword} `)) return true;
+
+  // CJK / Arabic / Cyrillic etc. are commonly written without spaces. Permit compact
+  // matching only for keywords that contain no ASCII letters or digits.
+  const hasAsciiAlphaNum = /[A-Za-z0-9]/.test(cleanKeyword);
+  if (!hasAsciiAlphaNum && compactKeyword && compactText.includes(compactKeyword)) return true;
+  return false;
+}
+
+function detectRegionByLocationCityMap(locationText, cityRegionKeywords) {
+  if (!cityRegionKeywords || typeof cityRegionKeywords !== 'object') {
+    return { region: '', source: '', keyword_hits: [] };
+  }
+  const fullText = clean(locationText || '');
+  const compactText = normalizeCompact(fullText);
+  const normText = ` ${normalizeWords(fullText)} `;
+  const hits = [];
+
+  for (const [region, keywords] of Object.entries(cityRegionKeywords)) {
+    const mappedRegion = normalizeRegionOutput(region);
+    const list = Array.isArray(keywords) ? keywords : [];
+    for (const keyword of list) {
+      if (!clean(keyword)) continue;
+      if (!phraseMatchesLocationCity(keyword, compactText, normText)) continue;
+      hits.push({ region: mappedRegion, keyword: clean(keyword) });
+      break;
+    }
+  }
+
+  const matchedRegions = unique(hits.map((x) => x.region).filter(Boolean));
+  if (matchedRegions.length === 1) return { region: matchedRegions[0], source: 'about_location_city_keyword', keyword_hits: hits };
+  if (matchedRegions.length > 1) {
+    const sameBusinessRegion = resolveSameBusinessRegionConflict(matchedRegions);
+    if (sameBusinessRegion) return { region: sameBusinessRegion, source: 'about_location_city_keyword_same_business_region', keyword_hits: hits };
+    return { region: '', source: 'about_location_keyword_conflict', keyword_hits: hits };
+  }
+  return { region: '', source: '', keyword_hits: [] };
+}
+
 function detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords) {
   // First identify explicit countries/territories; then normalize to the required region output.
   // Direct broad-region labels are only used when no country/territory was found.
@@ -807,6 +898,87 @@ function mapRegion(languageSignal, languageToRegion, regionKeywordMatch) {
     return normalizeRegionOutput(languageToRegion[languageSignal] || '');
   }
   return normalizeRegionOutput(defaultLanguageToRegion(languageSignal));
+}
+
+function detectRegionByAboutLocation(locationText, countryRegionKeywords, directRegionKeywords, cityRegionKeywords) {
+  const location = clean(locationText || '');
+  if (!location) return { region: '', source: '', keyword_hits: [] };
+
+  const countryMatch = detectRegionByKeywordMap(location, countryRegionKeywords, 'about_location_country_keyword');
+  if (countryMatch.source && countryMatch.source !== 'keyword_conflict' && countryMatch.region) return countryMatch;
+  if (countryMatch.source === 'keyword_conflict') return { ...countryMatch, source: 'about_location_keyword_conflict' };
+
+  const cityMatch = detectRegionByLocationCityMap(location, cityRegionKeywords);
+  if (cityMatch.source && cityMatch.source !== 'about_location_keyword_conflict' && cityMatch.region) return cityMatch;
+  if (cityMatch.source === 'about_location_keyword_conflict') return cityMatch;
+
+  const directRegionMatch = detectRegionByKeywordMap(location, directRegionKeywords, 'about_location_region_keyword');
+  if (directRegionMatch.source && directRegionMatch.source !== 'keyword_conflict' && directRegionMatch.region) return directRegionMatch;
+  if (directRegionMatch.source === 'keyword_conflict') return { ...directRegionMatch, source: 'about_location_keyword_conflict' };
+
+  return { region: '', source: '', keyword_hits: [] };
+}
+
+function formatRegionKeywordHits(groupNameMatch, aboutLocationMatch) {
+  const items = [];
+  const groupHits = Array.isArray(groupNameMatch?.keyword_hits) ? groupNameMatch.keyword_hits : [];
+  const locationHits = Array.isArray(aboutLocationMatch?.keyword_hits) ? aboutLocationMatch.keyword_hits : [];
+  for (const hit of groupHits) items.push(`group_name:${hit.region}:${hit.keyword}`);
+  for (const hit of locationHits) items.push(`about_location:${hit.region}:${hit.keyword}`);
+  return items.join('|');
+}
+
+function resolveRegionWithAboutLocationFallback({
+  groupName,
+  languageSignal,
+  languageToRegion,
+  countryRegionKeywords,
+  directRegionKeywords,
+  aboutLocationCityKeywords,
+  aboutLocationText,
+}) {
+  const groupNameMatch = detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords);
+  const existingRegion = mapRegion(languageSignal, languageToRegion, groupNameMatch);
+  const normalizedLocation = clean(aboutLocationText || '');
+
+  // Existing priority remains unchanged: group-name geography first, then the allowed language fallback.
+  if (existingRegion) {
+    return {
+      region: existingRegion,
+      source: groupNameMatch.source || 'language_map',
+      group_name_match: groupNameMatch,
+      about_location_match: { region: '', source: '', keyword_hits: [] },
+      about_location: normalizedLocation,
+      used_about_location: false,
+    };
+  }
+
+  // Only when the existing chain cannot resolve a region may About > Location supply the fallback.
+  const aboutLocationMatch = detectRegionByAboutLocation(
+    normalizedLocation,
+    countryRegionKeywords,
+    directRegionKeywords,
+    aboutLocationCityKeywords,
+  );
+  if (aboutLocationMatch.source && aboutLocationMatch.source !== 'about_location_keyword_conflict' && aboutLocationMatch.region) {
+    return {
+      region: normalizeRegionOutput(aboutLocationMatch.region),
+      source: aboutLocationMatch.source,
+      group_name_match: groupNameMatch,
+      about_location_match: aboutLocationMatch,
+      about_location: normalizedLocation,
+      used_about_location: true,
+    };
+  }
+
+  return {
+    region: '',
+    source: aboutLocationMatch.source || groupNameMatch.source || '',
+    group_name_match: groupNameMatch,
+    about_location_match: aboutLocationMatch,
+    about_location: normalizedLocation,
+    used_about_location: false,
+  };
 }
 
 function normalizeCompact(s) {
@@ -1216,6 +1388,77 @@ async function extractLanguagePageText(page) {
   });
 }
 
+async function extractAboutLocationFromPage(page) {
+  return page.evaluate(() => {
+    const normalize = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/[\t\r ]+/g, ' ').trim();
+    const key = (s) => normalize(s)
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[：:·•|｜\-–—]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const labels = new Set([
+      'location', 'group location', 'location of this group', 'based in', 'located in',
+      '位置', '地点', '地點', '所在地', '群组位置', '群組位置', '小组位置', '小組位置', '这个小组的位置', '這個小組的位置',
+      'ubicacion', 'localizacion', 'localização', 'localizacao', 'lieu', 'emplacement', 'standort', 'ort', 'posizione', 'localita', 'locatie',
+      'konum', 'lokasi', 'lokasyon', 'vi tri', 'dia diem', 'ตำแหน่งที่ตั้ง', 'สถานที่', '場所', '위치', 'местоположение', 'расположение', 'الموقع', 'مکان'
+    ]);
+    const blocked = new Set([
+      'public', 'private', 'visible', 'hidden', 'members', 'posts', 'about', 'discussion', 'photos', 'videos', 'files', 'events',
+      '公开', '公開', '私密', '成员', '成員', '帖子', '貼文', '简介', '簡介', '讨论', '討論', '照片', '视频', '影片', '文件', '活动', '活動'
+    ]);
+    const candidates = [];
+    const add = (value) => {
+      let v = normalize(value);
+      if (!v || v.length < 2 || v.length > 180) return;
+      v = v.replace(/^(?:location|group location|location of this group|based in|located in|位置|地点|地點|所在地|群组位置|群組位置|小组位置|小組位置|这个小组的位置|這個小組的位置|ubicaci[oó]n|localizaci[oó]n|localizaç[aã]o|lieu|emplacement|standort|ort|posizione|localit[aà]|locatie|konum|lokasi|lokasyon|v[ịi] tr[ií]|đ[ịi]a đi[ểe]m|สถานที่|場所|위치|местоположение|расположение|الموقع|مکان)\s*[:：·•|｜\-–—]?\s*/iu, '').trim();
+      const k = key(v);
+      if (!v || blocked.has(k)) return;
+      if (/^(?:not available|unknown|n\/a|none|暂无|無|未知)$/iu.test(v)) return;
+      if (/^(?:https?:\/\/|www\.)/i.test(v)) return;
+      if (/\b(?:members?|posts?|photos?|videos?|files?|events?)\b/i.test(v) && v.length < 45) return;
+      candidates.push(v);
+    };
+    const lines = normalize(document.body?.innerText || '').split(/\n+/).map(normalize).filter(Boolean);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const k = key(line);
+      if (labels.has(k)) {
+        for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
+          const next = lines[j];
+          if (labels.has(key(next))) continue;
+          add(next);
+          break;
+        }
+      }
+      const colon = line.match(/^(.{1,48}?)(?:\s*[:：·•|｜]\s*)(.{2,180})$/u);
+      if (colon && labels.has(key(colon[1]))) add(colon[2]);
+    }
+    const main = document.querySelector('[role="main"]') || document.body;
+    const all = Array.from(main.querySelectorAll('div, span, strong, h2, h3'));
+    for (const el of all) {
+      const own = normalize(el.innerText || el.textContent || '');
+      if (!labels.has(key(own))) continue;
+      for (const sibling of [el.nextElementSibling, el.parentElement?.nextElementSibling]) {
+        if (sibling) add(sibling.innerText || sibling.textContent || '');
+      }
+      let parent = el.parentElement;
+      for (let depth = 0; parent && depth < 3; depth++, parent = parent.parentElement) {
+        const parts = normalize(parent.innerText || parent.textContent || '').split(/\n+/).map(normalize).filter(Boolean);
+        const idx = parts.findIndex((x) => labels.has(key(x)));
+        if (idx >= 0 && parts[idx + 1]) add(parts[idx + 1]);
+      }
+    }
+    const unique = Array.from(new Set(candidates.map((x) => normalize(x)).filter(Boolean)));
+    unique.sort((a, b) => {
+      const score = (x) => (/[\p{L}]/u.test(x) ? 5 : 0) + (/[,:，]/u.test(x) ? 3 : 0) + Math.min(x.length, 80) / 100;
+      return score(b) - score(a);
+    });
+    return unique[0] || '';
+  });
+}
+
 async function settleAboutPage(page) {
   await page.waitForTimeout(2500);
   try {
@@ -1253,9 +1496,17 @@ async function fetchAboutWithRetry(page, groupUrl, maxTry = 2, timeoutMs = 60000
         const pageText = await extractPageText(page);
         const languageText = await extractLanguagePageText(page);
         const pageGroupName = await extractGroupNameFromPage(page);
+        const locationText = await extractAboutLocationFromPage(page);
         if (!pageText || pageText.length < 40) continue;
         if (unavailableText(pageText)) continue;
-        return { ok: true, text: pageText, language_text: languageText, group_name: pageGroupName, reason: '' };
+        return {
+          ok: true,
+          text: pageText,
+          language_text: languageText,
+          location_text: locationText,
+          group_name: pageGroupName,
+          reason: '',
+        };
       } catch (_e) {
         // try next attempt/url
       }
@@ -1709,6 +1960,7 @@ function resolveCollisions(rows) {
   };
   const regionKeywords = mergeKeywordMap(DEFAULT_COUNTRY_REGION_KEYWORDS, config.region_keywords || config.country_region_keywords);
   const directRegionKeywords = mergeKeywordMap(DEFAULT_DIRECT_REGION_KEYWORDS, config.direct_region_keywords);
+  const aboutLocationCityKeywords = mergeKeywordMap(DEFAULT_ABOUT_LOCATION_CITY_KEYWORDS, config.about_location_city_keywords);
   const allowedLanguageSignals = Array.isArray(config.allowed_language_signals)
     ? new Set(config.allowed_language_signals.map((x) => clean(x)).filter(Boolean))
     : null;
@@ -1806,6 +2058,7 @@ function resolveCollisions(rows) {
       'risk_level',
       '__region_source',
       '__region_keyword_hits',
+      '__region_location',
     ];
     let currentGameName = '';
     let currentGameIndex = -1;
@@ -2063,8 +2316,17 @@ function resolveCollisions(rows) {
         const match = matchGame(profile, candidateGroupName, aboutText, c.snippet);
         const thresholdSpec = thresholdSpecForMatch(match, threshold);
         let languageSignal = detectLanguageSignalFromEvidence(candidateGroupName, aboutLanguageText, '', '');
-        const regionKeywordMatch = detectRegionByGroupName(candidateGroupName, regionKeywords, directRegionKeywords);
-        let region = mapRegion(languageSignal, languageToRegion, regionKeywordMatch);
+        const aboutLocationText = clean(about.location_text || '');
+        let regionResolution = resolveRegionWithAboutLocationFallback({
+          groupName: candidateGroupName,
+          languageSignal,
+          languageToRegion,
+          countryRegionKeywords: regionKeywords,
+          directRegionKeywords,
+          aboutLocationCityKeywords,
+          aboutLocationText,
+        });
+        let region = regionResolution.region;
 
         const row = {
           snapshot_date: normalizeSnapshotDate(snapshotDate || config.snapshot_date, new Date().toISOString().slice(0, 10)),
@@ -2093,8 +2355,9 @@ function resolveCollisions(rows) {
           __query_variant_types: Array.isArray(c.query_variant_types) ? c.query_variant_types.join('|') : (c.query_variant_type || ''),
           __source_is_seed_url: c.source_is_seed_url ? 'yes' : 'no',
           __variant_threshold_applied: `${thresholdSpec.source}:group_size>=${thresholdSpec.group_size};today_posts>=${thresholdSpec.today_posts};week_new_fans>=${thresholdSpec.week_new_fans}`,
-          __region_source: regionKeywordMatch.source || (region ? 'language_map' : ''),
-          __region_keyword_hits: (regionKeywordMatch.keyword_hits || []).map((x) => `${x.region}:${x.keyword}`).join('|'),
+          __region_source: regionResolution.source || '',
+          __region_keyword_hits: formatRegionKeywordHits(regionResolution.group_name_match, regionResolution.about_location_match),
+          __region_location: aboutLocationText,
         };
 
         if (match.manual_review) {
@@ -2105,6 +2368,7 @@ function resolveCollisions(rows) {
             group_url: row.group_url,
             language_signal: row.language_signal,
             region: row.region,
+            about_location: row.__region_location,
             match_type: match.type,
             matched_phrase: match.phrase || '',
             negative_hit: match.negative_hit || '',
@@ -2156,10 +2420,21 @@ function resolveCollisions(rows) {
           discussionLanguage.ok ? discussionLanguage.text : '',
           ''
         );
-        region = mapRegion(languageSignal, languageToRegion, regionKeywordMatch);
+        regionResolution = resolveRegionWithAboutLocationFallback({
+          groupName: candidateGroupName,
+          languageSignal,
+          languageToRegion,
+          countryRegionKeywords: regionKeywords,
+          directRegionKeywords,
+          aboutLocationCityKeywords,
+          aboutLocationText,
+        });
+        region = regionResolution.region;
         row.language_signal = languageSignal;
         row.region = region;
-        row.__region_source = regionKeywordMatch.source || (region ? 'language_map' : '');
+        row.__region_source = regionResolution.source || '';
+        row.__region_keyword_hits = formatRegionKeywordHits(regionResolution.group_name_match, regionResolution.about_location_match);
+        row.__region_location = aboutLocationText;
 
         if (allowedLanguageSignals && allowedLanguageSignals.size && !allowedLanguageSignals.has(row.language_signal)) {
           stats.dropped_lang_region++;
@@ -2230,6 +2505,7 @@ function resolveCollisions(rows) {
         'group_url',
         'language_signal',
         'region',
+        'about_location',
         'match_type',
         'matched_phrase',
         'negative_hit',

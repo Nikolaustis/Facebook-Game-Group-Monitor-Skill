@@ -395,5 +395,126 @@
       "oceania",
       "pacific islands"
     ]
+  },
+  "about_location_city_keywords": {
+    "TH": [
+      "bangkok",
+      "chiang mai",
+      "pattaya",
+      "phuket"
+    ],
+    "VN": [
+      "hanoi",
+      "ho chi minh city",
+      "saigon",
+      "da nang"
+    ],
+    "PH": [
+      "manila",
+      "quezon city",
+      "cebu city",
+      "davao city"
+    ],
+    "ID": [
+      "jakarta",
+      "surabaya",
+      "bandung"
+    ],
+    "MY": [
+      "kuala lumpur",
+      "johor bahru",
+      "penang"
+    ],
+    "SG": [
+      "singapore"
+    ],
+    "JP": [
+      "tokyo",
+      "osaka"
+    ],
+    "KR": [
+      "seoul",
+      "busan"
+    ],
+    "CN": [
+      "beijing",
+      "shanghai",
+      "guangzhou",
+      "shenzhen"
+    ],
+    "HK": [
+      "hong kong"
+    ],
+    "TW": [
+      "taipei",
+      "kaohsiung"
+    ],
+    "Middle East": [
+      "riyadh",
+      "dubai",
+      "abu dhabi",
+      "doha",
+      "tehran",
+      "cairo"
+    ],
+    "South Asia": [
+      "new delhi",
+      "mumbai",
+      "karachi",
+      "dhaka",
+      "colombo"
+    ],
+    "North America": [
+      "new york",
+      "los angeles",
+      "toronto",
+      "vancouver"
+    ],
+    "LATAM": [
+      "mexico city",
+      "buenos aires",
+      "santiago",
+      "bogota",
+      "lima"
+    ],
+    "BR": [
+      "sao paulo",
+      "rio de janeiro",
+      "brasilia"
+    ],
+    "Africa": [
+      "lagos",
+      "nairobi",
+      "accra",
+      "johannesburg",
+      "cape town"
+    ],
+    "TR": [
+      "istanbul",
+      "ankara"
+    ],
+    "DE": [
+      "berlin",
+      "munich",
+      "hamburg"
+    ],
+    "FR": [
+      "paris",
+      "marseille",
+      "lyon"
+    ],
+    "EUR": [
+      "london",
+      "madrid",
+      "lisbon",
+      "stockholm",
+      "dublin"
+    ],
+    "Oceania": [
+      "sydney",
+      "melbourne",
+      "auckland",
+      "wellington"
+    ]
   }
 }

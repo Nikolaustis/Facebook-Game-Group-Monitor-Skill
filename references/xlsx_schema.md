@@ -1,4 +1,4 @@
-# Excel 字段规范（V3.6.1）
+# Excel 字段规范（V4.1.0）
 
 V3.6.1 起不再读写或保存 CSV。第二轮只输出 `fb_monitoring_filtered.xlsx`，并在同一个工作簿中包含：
 
@@ -10,13 +10,13 @@ V3.6.1 起不再读写或保存 CSV。第二轮只输出 `fb_monitoring_filtered
 ## detail 固定列顺序
 
 ```text
-snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size,today_posts,week_new_fans,活跃指数=当日新帖/社群规模,规模增速=上周新增/(社群规模-上周新增）,existed_last_month,is_relevant,action,action_reason,risk_level,__region_source,__region_keyword_hits
+snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size,today_posts,week_new_fans,活跃指数=当日新帖/社群规模,规模增速=上周新增/(社群规模-上周新增）,existed_last_month,is_relevant,action,action_reason,risk_level,__region_source,__region_keyword_hits,__region_location
 ```
 
 ## detail 字段说明
 
 - `snapshot_date`：文本格式，示例 `2026-05-07`，不得保存为 Excel 日期序列号。
-- `region`：优先由群组名称中的明确国家/地区/属地/大区语义得到，再按业务区域规则归并输出；若多个命中项属于同一业务大区，输出该大区；跨业务大区冲突或无法确定时留空。
+- `region`：优先由群组名称中的明确国家/地区/属地/大区语义得到，再按业务区域规则归并输出；未命中时可使用允许的高确定性语言映射；若上述链路仍无法确定，才从 About 页明确标注的“所在地 / Location”字段中识别国家/地区或高确定性城市。若多个命中项属于同一业务大区，输出该大区；跨业务大区冲突且 About 所在地也无法解决时留空。
 - `language`：以讨论区前五条可见玩家发言为主，先逐条识别再汇总；若前五条出现两个以上可信语言，标记为 `Mixed`。群名辅助，用户手写 about 非 UI 文本最低优先级兜底。
 - `game_name`：用户输入的目标游戏名。
 - `group_name`：Facebook 群组名称。seed URL 候选若第一轮无群名，第二轮应从页面补取。
@@ -32,13 +32,14 @@ snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size
 - `action`：`add` / `update` / 留空。
 - `action_reason`：输出记录必须填写，并体现实际阈值，例如 `today_posts>=20; existed_last_month=yes`。
 - `risk_level`：`low` / `medium` / `high`。
-- `__region_source`：地区来源，例如 `country_keyword` / `region_keyword` / `country_keyword_same_business_region` / `region_keyword_same_business_region` / `language_map` / `keyword_conflict` / 留空。
-- `__region_keyword_hits`：地区关键词命中详情。
+- `__region_source`：地区来源，例如 `country_keyword` / `region_keyword` / `country_keyword_same_business_region` / `region_keyword_same_business_region` / `language_map` / `about_location_country_keyword` / `about_location_city_keyword` / `about_location_region_keyword` / `keyword_conflict` / 留空。
+- `__region_keyword_hits`：地区关键词命中详情；当 About 所在地兜底介入时，会以 `group_name:` 与 `about_location:` 前缀标记证据来源。
+- `__region_location`：从 About 页明确“所在地 / Location”字段提取的原始位置文本，仅用于地区判断审计；它不会覆盖已由群名或允许语言映射得到的 `region`。
 
 ## manual_review 固定列顺序
 
 ```text
-snapshot_date,game_name,group_name,group_url,language_signal,region,match_type,matched_phrase,negative_hit,review_reason,source_query,query_variant_type,source_is_seed_url,variant_threshold_applied
+snapshot_date,game_name,group_name,group_url,language_signal,region,about_location,match_type,matched_phrase,negative_hit,review_reason,source_query,query_variant_type,source_is_seed_url,variant_threshold_applied
 ```
 
 ## debug_rows.json 字段

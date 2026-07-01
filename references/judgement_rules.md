@@ -1,4 +1,4 @@
-# 判定与过滤规则（V3.6.1 受控标题变体版）
+# 判定与过滤规则（V4.1.0 受控标题变体版）
 
 ## A. 第一轮：搜索与深翻页
 1. Skill 支持一次任务同时检索多个游戏。每个游戏必须独立生成搜索计划，不能把某个游戏的特殊变体扩散到其他游戏。
@@ -68,7 +68,8 @@
 10. 若明确识别到非洲国家，即使语言是 Arabic，也必须优先输出 `Africa`；Egypt 例外，归入 `Middle East`。
 11. 未命中群名地区语义时，仅允许高确定性语言辅助映射：Thai -> TH、Vietnamese -> VN、Indonesian -> ID、Malay -> MY、Filipino -> PH、Lao -> LA、Khmer -> KH、Burmese -> MM、Arabic/Persian -> Middle East。
 12. English、Spanish、Chinese、French、Portuguese、Mixed 不得单独映射为国家地区。
-13. 不设置语言或地区硬限制时，所有地区和语言均可收录，但必须展示识别结果与来源字段。
+13. 若群名地区语义与允许的语言映射均无法确定 `region`，才可读取 About 页中明确标注的“所在地 / Location”字段：先识别国家/地区，再识别 `about_location_city_keywords` 中配置的高确定性城市。该位置兜底不得覆盖前述已得到的地区结论；若群名存在跨大区冲突，About 所在地可作为最终可信位置证据重新判定。
+14. 不设置语言或地区硬限制时，所有地区和语言均可收录，但必须展示识别结果与来源字段。
 
 ## F. 不输出规则
 以下记录不得进入 `detail` 工作表：
