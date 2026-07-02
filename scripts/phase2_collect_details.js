@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 const XLSX = require('xlsx');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const { createCodexProgressReporter, parseProgressReportEveryMinutes } = require('./progress_reporter');
 
 let emergencyFlush = null;
@@ -98,7 +98,7 @@ function writeCompletionStatus(outFile, payload) {
   }
 }
 
-function requestWindowsShutdown({ delaySeconds, comment }) {
+function requestWindowsForcedShutdown({ delaySeconds, comment }) {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') {
       resolve({ ok: false, requested: false, reason: `unsupported_platform:${process.platform}` });
@@ -107,12 +107,15 @@ function requestWindowsShutdown({ delaySeconds, comment }) {
 
     const safeDelaySeconds = Math.max(0, Math.floor(Number(delaySeconds) || 0));
     const safeComment = String(comment || 'FB group monitoring finished. System will shut down.').slice(0, 512);
-    execFile('shutdown.exe', ['/s', '/t', String(safeDelaySeconds), '/c', safeComment], (err, stdout, stderr) => {
+    const shutdownArgs = ['/s', '/f', '/t', String(safeDelaySeconds), '/d', 'p:0:0', '/c', safeComment];
+    execFile('shutdown.exe', shutdownArgs, (err, stdout, stderr) => {
       if (err) {
         resolve({
           ok: false,
           requested: true,
           reason: err && err.message ? err.message : String(err),
+          command: `shutdown.exe ${shutdownArgs.join(' ')}`,
+          force_apps: true,
           stdout: stdout || '',
           stderr: stderr || '',
         });
@@ -121,13 +124,67 @@ function requestWindowsShutdown({ delaySeconds, comment }) {
       resolve({
         ok: true,
         requested: true,
-        reason: 'shutdown_command_sent',
+        reason: 'forced_shutdown_command_sent',
+        command: `shutdown.exe ${shutdownArgs.join(' ')}`,
         delay_seconds: safeDelaySeconds,
+        force_apps: true,
         stdout: stdout || '',
         stderr: stderr || '',
       });
     });
   });
+}
+
+function startConditionalShutdownWatcher({ watchPid, completionFile, outXlsx, delaySeconds, comment }) {
+  if (process.platform !== 'win32') {
+    return { ok: false, requested: false, reason: `unsupported_platform:${process.platform}` };
+  }
+  const watcherScript = path.join(__dirname, 'conditional_shutdown_watcher.js');
+  if (!fs.existsSync(watcherScript)) {
+    return { ok: false, requested: false, reason: 'conditional_shutdown_watcher_missing', watcher_script: watcherScript };
+  }
+
+  const token = `fbm-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const watcherStatusFile = path.join(path.dirname(completionFile), 'conditional_shutdown_watcher_status.json');
+  const safeDelaySeconds = Math.max(0, Math.floor(Number(delaySeconds) || 0));
+  const safeComment = String(comment || 'FB group monitoring finished. System will shut down.').slice(0, 512);
+  try {
+    const child = spawn(process.execPath, [
+      watcherScript,
+      '--watch-pid', String(watchPid),
+      '--completion', completionFile,
+      '--out-xlsx', outXlsx,
+      '--status-file', watcherStatusFile,
+      '--delay-seconds', String(safeDelaySeconds),
+      '--comment', safeComment,
+      '--token', token,
+    ], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+    return {
+      ok: true,
+      requested: true,
+      reason: 'conditional_forced_shutdown_watcher_started',
+      watcher_pid: child.pid,
+      watcher_status_file: watcherStatusFile,
+      watcher_script: watcherScript,
+      watcher_token: token,
+      delay_seconds: safeDelaySeconds,
+      force_apps: true,
+      shutdown_command_template: `shutdown.exe /s /f /t ${safeDelaySeconds} /d p:0:0 /c <comment>`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      requested: false,
+      reason: err && err.message ? err.message : String(err),
+      watcher_script: watcherScript,
+      watcher_status_file: watcherStatusFile,
+    };
+  }
 }
 
 function toInt(v) {
@@ -2007,6 +2064,7 @@ function resolveCollisions(rows) {
     close_chrome_after_report: closeChromeAfterReport,
     shutdown_after_complete: shutdownAfterComplete,
     shutdown_delay_seconds: shutdownDelaySeconds,
+    shutdown_force_apps: true,
   };
 
   try {
@@ -2612,20 +2670,49 @@ function resolveCollisions(rows) {
             requested: false,
             reason: 'shutdown_skipped_because_close_chrome_after_report_is_false',
           };
+        } else if (!chromeClosed) {
+          shutdownResult = {
+            ok: false,
+            requested: false,
+            reason: 'shutdown_skipped_because_chrome_close_was_not_confirmed',
+          };
         } else {
-          shutdownResult = await requestWindowsShutdown({
+          shutdownResult = startConditionalShutdownWatcher({
+            watchPid: process.pid,
+            completionFile: outCompletion,
+            outXlsx,
             delaySeconds: shutdownDelaySeconds,
             comment: 'FB group monitoring finished. System will shut down.',
           });
+          if (!shutdownResult.ok) {
+            const watcherFailure = shutdownResult;
+            const directFallback = await requestWindowsForcedShutdown({
+              delaySeconds: shutdownDelaySeconds,
+              comment: 'FB group monitoring finished. System will shut down.',
+            });
+            shutdownResult = {
+              ...directFallback,
+              watcher_fallback: true,
+              watcher_failure: watcherFailure,
+            };
+          }
         }
         writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
-          status: shutdownResult.ok ? 'completed_shutdown_scheduled' : 'completed_shutdown_not_scheduled',
+          status: shutdownResult.ok
+            ? (shutdownResult.reason === 'conditional_forced_shutdown_watcher_started'
+              ? 'completed_shutdown_watcher_started'
+              : 'completed_forced_shutdown_scheduled')
+            : 'completed_shutdown_not_scheduled',
           final_report_generated: true,
           report_created: fs.existsSync(outXlsx),
           chrome_closed: chromeClosed,
           chrome_close_result: chromeCloseResult,
           shutdown_requested: Boolean(shutdownAfterComplete),
           shutdown_result: shutdownResult,
+          shutdown_watcher_pid: shutdownResult.watcher_pid || null,
+          shutdown_watcher_status_file: shutdownResult.watcher_status_file || '',
+          shutdown_watcher_token: shutdownResult.watcher_token || '',
+          shutdown_force_apps: true,
           completed_at: new Date().toISOString(),
         }));
         console.log(JSON.stringify({

@@ -1,8 +1,8 @@
-# FB Game Group Monitor Skill V4.1.0
+# FB Game Group Monitor Skill V4.2.0
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V4.1.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V4.2.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。
 
 ## 核心能力
 
@@ -20,7 +20,7 @@
 - 当群名与允许的语言兜底仍无法确定地区时，读取 About 页中明确标注的“所在地 / Location”字段；国家/地区优先，已配置的高确定性城市次之。
 - Excel 输出固定列顺序，`snapshot_date` 和 `group_id` 强制文本格式，活跃指数/规模增速为百分比公式。
 - 后台启动后会立即返回 PID 与日志路径；第二轮默认每 30 分钟输出一次 `codex_progress_report`，并刷新 `codex_progress_report.json`。
-- 可选“完成后关机”：默认不启用，只有命令加入 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true` 后，才会在最终报表生成并关闭 Chrome 后执行 Windows 关机。
+- 可选“完成后关机”：默认不启用。启用后会在最终报表生成并确认 Chrome 已关闭后，启动独立 Node 监控器；该监控器等待第二轮进程退出、核验结果文件，再执行 `shutdown.exe /s /f /t <秒数>`。
 
 ## 变体规则
 
@@ -88,7 +88,8 @@ npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo
 - `stdout_log` / `stderr_log`：后台日志。
 - `codex_progress_report.json`：Codex 进度快照。
 - `background_task.json`：本次后台任务元信息。
-- `codex_task_complete.json`：第二轮完成状态；若启用关机，会记录关机命令是否已发出。
+- `codex_task_complete.json`：第二轮完成状态；若启用关机，会记录独立关机监控器信息。
+- `conditional_shutdown_watcher_status.json`：关机监控器状态，包括最终 Excel 校验和强制关机命令是否已发出。
 
 查看状态：
 
@@ -115,7 +116,7 @@ node .\scripts\phase2_collect_details.js --index ".\runs\demo\phase1_index.json"
 
 设为 `0` 可关闭定时汇报。第二轮最终 Excel 报告生成后默认自动关闭 Chrome；如需保留浏览器，加 `--no-close-chrome true`，或在配置中设置 `"close_chrome_after_report": false`。
 
-自动关机默认关闭。只有当用户在提示词中明确要求“完成后关机 / 跑完关机”时，Codex 才能使用 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true`。触发后会在最终报表写入成功、Chrome 关闭后执行：`shutdown.exe /s /t <秒数>`；默认延迟 60 秒，期间可用 `shutdown.exe /a` 取消。
+自动关机默认关闭。只有当用户在提示词中明确要求“完成后关机 / 跑完关机”时，Codex 才能使用 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true`。触发后，第二轮会先写入最终报表并确认 Chrome 已关闭，再启动独立 Node 关机监控器。监控器在第二轮 Node 进程退出后核验 Excel 与完成状态，随后执行：`shutdown.exe /s /f /t <秒数> /d p:0:0 /c "..."`。`/f` 会强制关闭阻塞应用，监控器在锁屏状态下仍会运行；默认延迟 60 秒，期间可用 `shutdown.exe /a` 取消。若监控器启动失败，第二轮脚本会直接发送相同的带 `/f` 强制关机命令作为回退。
 
 ## 输出文件
 
@@ -135,7 +136,8 @@ node .\scripts\phase2_collect_details.js --index ".\runs\demo\phase1_index.json"
 - `phase2_autosave_summary.json`: 当前局部摘要，保持兼容旧观察命令。
 - `partial_verified_rows.xlsx`: 已通过筛选行的可读暂存表；启动时先创建表头，每命中 1 条有效群组就立即保存。
 - `phase2_autosave_last_error.txt`: 仅当暂存 Excel 写入失败时出现；通常是文件被 Excel 打开占用。
-- `codex_task_complete.json`: 第二轮最终状态文件，记录完整报表是否生成、Chrome 是否关闭、是否请求关机以及关机命令结果。
+- `codex_task_complete.json`: 第二轮最终状态文件，记录完整报表是否生成、Chrome 是否关闭、是否请求关机及独立关机监控器信息。
+- `conditional_shutdown_watcher_status.json`: 仅启用完成后关机时生成；记录第二轮退出后的文件校验与强制关机结果。
 
 Excel 工作簿包含：
 

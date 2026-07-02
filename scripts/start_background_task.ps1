@@ -184,6 +184,8 @@ $status = [ordered]@{
   completion_file = (Join-Path $RunDir "codex_task_complete.json")
   shutdown_after_complete = [bool]$ShutdownAfterComplete
   shutdown_delay_seconds = $ShutdownDelaySeconds
+  shutdown_force_apps = [bool]$ShutdownAfterComplete
+  shutdown_watcher_file = (Join-Path $RunDir "conditional_shutdown_watcher_status.json")
   note = "后台任务已启动；当前 PowerShell/Codex 命令会立即结束，聊天输入框可继续输入。"
 }
 $status | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $StatusFile -Encoding UTF8

@@ -35,6 +35,8 @@ $result = [ordered]@{
   completion = $null
   shutdown_after_complete = $status.shutdown_after_complete
   shutdown_delay_seconds = $status.shutdown_delay_seconds
+  shutdown_force_apps = $status.shutdown_force_apps
+  shutdown_watcher = $null
   stdout_log = $status.stdout_log
   stderr_log = $status.stderr_log
 }
@@ -54,6 +56,10 @@ if (Test-Path $loginStateFile) {
 $completionFile = Join-Path $RunDir "codex_task_complete.json"
 if (Test-Path $completionFile) {
   $result.completion = Get-Content -LiteralPath $completionFile -Raw | ConvertFrom-Json
+}
+$shutdownWatcherFile = Join-Path $RunDir "conditional_shutdown_watcher_status.json"
+if (Test-Path $shutdownWatcherFile) {
+  $result.shutdown_watcher = Get-Content -LiteralPath $shutdownWatcherFile -Raw | ConvertFrom-Json
 }
 
 $result | ConvertTo-Json -Depth 12

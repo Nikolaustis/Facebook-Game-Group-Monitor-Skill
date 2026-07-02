@@ -1,3 +1,64 @@
+# V4.2.0 补丁说明：锁屏可用的独立强制关机监控器
+
+## 问题修复
+
+此前第二阶段在主 Node 采集进程内部直接调用 `shutdown.exe /s /t <秒数>`。该方式没有 `/f`，当锁屏后仍有前台应用或交互会话阻塞关机时，Windows 可能无法按计划完成关机。
+
+## 新的关机链路
+
+当且仅当用户明确开启 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true` 时，第二阶段现在按以下顺序执行：
+
+1. 写入完整 Excel 报表。
+2. 通过 CDP 关闭本次采集 Chrome，并确认关闭成功。
+3. 写入 `codex_task_complete.json`。
+4. 启动独立的 Node 监控器 `scripts/conditional_shutdown_watcher.js`，并将其与主采集进程脱离。
+5. 监控器等待第二阶段 Node 进程退出，随后核验最终 Excel、完成状态和一次性 token。
+6. 校验通过后，监控器执行：
+
+```text
+shutdown.exe /s /f /t <秒数> /d p:0:0 /c "FB group monitoring finished. System will shut down."
+```
+
+`/f` 会强制关闭阻塞关机的应用。监控器不依赖已解锁的交互桌面，因此锁屏时仍能继续等待并发送关机命令。
+
+如独立监控器因意外原因无法启动，主第二阶段脚本会回退为直接执行同一条带 `/f` 的强制关机命令；不会静默降级为非强制关机。
+
+## 新增/更新文件
+
+- `scripts/conditional_shutdown_watcher.js`：独立关机监控器。
+- `scripts/phase2_collect_details.js`：启动监控器，并将旧的直接非强制关机改为带 `/f` 的回退路径。
+- `scripts/start_background_task.ps1`：后台状态中加入强制关机与监控器状态文件信息。
+- `scripts/show_background_task_status.ps1`：可直接显示监控器状态。
+- `SKILL.md`、`README.md`：更新关机顺序、命令和状态文件说明。
+
+## 新增状态文件
+
+启用完成后关机时，会在当前 run 目录生成：
+
+```text
+conditional_shutdown_watcher_status.json
+```
+
+其中会记录：监控器 PID、被监控的第二阶段 PID、Excel/完成状态校验结果、是否已发送 `shutdown.exe /s /f` 命令，以及失败原因（若有）。
+
+## 使用与取消
+
+命令保持不变：
+
+```powershell
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -ShutdownAfterComplete -ShutdownDelaySeconds 60
+```
+
+默认延迟仍为 60 秒。发送关机命令后，可在倒计时内运行：
+
+```powershell
+shutdown.exe /a
+```
+
+取消。
+
+---
+
 # V4.1.0 补丁说明：About 所在地末级地区兜底
 
 本次补丁在既有 V4.0.0 地区规则后新增一个**末级兜底**：当群组名称中的国家/地区/大区语义、同业务大区归并以及允许的语言映射都无法确定 `region` 时，第二阶段会从已打开的 About 页面中解析明确标注的“所在地 / Location”字段。
