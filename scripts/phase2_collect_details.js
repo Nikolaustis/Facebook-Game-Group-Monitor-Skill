@@ -241,6 +241,15 @@ function stripDiacritics(s) {
   return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// Mongolian is written primarily in Cyrillic, but the letters Ө/ө and Ү/ү are not part of standard Russian orthography.
+// They are therefore decisive Mongolian evidence and must be evaluated before the generic Cyrillic -> Russian fallback.
+const MONGOLIAN_UNIQUE_CYRILLIC_PATTERN = /[ӨөҮү]/g;
+const MONGOLIAN_STRONG_LANGUAGE_MARKERS = [
+  'сайн байна', 'байна уу', 'баярлалаа', 'тоглоом', 'тоглогч',
+  'зарна', 'авна', 'солно', 'гишүүд', 'худалдана', 'худалдаа',
+  'хэрхэн', 'манай', 'туслаач', 'болно'
+];
+
 const DEFAULT_LANGUAGE_KEYWORDS = {
   Thai: ['thai', 'thailand'],
   Vietnamese: ['vietnam', 'viet nam', 'viet', 'mua ban', 'cong dong', 'nap', 'giao luu', 'thanh vien', 'bai viet', 'nhom'],
@@ -254,6 +263,7 @@ const DEFAULT_LANGUAGE_KEYWORDS = {
   Korean: ['korea', 'korean'],
   French: ['francais', 'français', 'francophone', 'france', 'afrique francophone'],
   German: ['deutsch', 'german', 'deutschland'],
+  Mongolian: [],
   Russian: ['russian', 'russia'],
   Arabic: ['arabic'],
   Persian: ['persian', 'farsi'],
@@ -278,6 +288,7 @@ const EXTRA_LANGUAGE_KEYWORDS = {
   Lao: ['lao', 'laos'],
   Khmer: ['khmer', 'cambodia'],
   Burmese: ['burmese', 'myanmar'],
+  Mongolian: MONGOLIAN_STRONG_LANGUAGE_MARKERS,
   Persian: ['farsi', 'iranian', 'persian'],
   English: ['community', 'players', 'buy', 'sell', 'trade', 'account', 'accounts', 'guide', 'tips'],
 };
@@ -304,6 +315,7 @@ const SCRIPT_LANGUAGE_PATTERNS = {
   Chinese: /[\u4E00-\u9FFF]/g,
   Japanese: /[\u3040-\u30FF]/g,
   Korean: /[\uAC00-\uD7AF]/g,
+  Mongolian: MONGOLIAN_UNIQUE_CYRILLIC_PATTERN,
   Russian: /[\u0400-\u04FF]/g,
   Arabic: /[\u0600-\u06FF]/g,
   Hindi: /[\u0900-\u097F]/g,
@@ -552,6 +564,19 @@ function phraseCount(text, phrases) {
   return count;
 }
 
+function hasMongolianCyrillicLanguageEvidence(text) {
+  const evidence = clean(text);
+  const cyrillicCount = countPattern(evidence, /[\u0400-\u04FF]/g);
+  if (cyrillicCount < 2) return false;
+
+  // A single Ө/ө or Ү/ү is strong enough because those letters are not used in ordinary Russian text.
+  if (countPattern(evidence, MONGOLIAN_UNIQUE_CYRILLIC_PATTERN) >= 1) return true;
+
+  // Some short Mongolian posts do not contain Ө/Ү (for example, “Сайн байна уу”).
+  // In that case require a high-confidence Mongolian lexical marker, never only a geographic name.
+  return phraseCount(evidence, MONGOLIAN_STRONG_LANGUAGE_MARKERS) >= 1;
+}
+
 function normalizedTokens(text) {
   return stripDiacritics(clean(text).toLowerCase())
     .replace(/[^\p{Letter}\p{Number}]+/gu, ' ')
@@ -580,6 +605,8 @@ function mergedLanguageKeywords(lang) {
 
 function detectLanguageSignal(groupName, aboutText, snippet) {
   const fullText = clean(`${groupName || ''}\n${aboutText || ''}\n${snippet || ''}`);
+  // Do not let the generic Cyrillic rule classify Mongolian as Russian.
+  if (hasMongolianCyrillicLanguageEvidence(fullText)) return 'Mongolian';
   const enChars = countEnglishLetters(fullText);
   const scores = {};
 
@@ -691,6 +718,7 @@ function detectLanguageFromGroupName(groupName) {
   if (countThaiChars(name) >= 2) return 'Thai';
   if (/[\u0600-\u06FF]/u.test(name)) return 'Arabic';
   if (/[\u0900-\u097F]/u.test(name)) return 'Hindi';
+  if (hasMongolianCyrillicLanguageEvidence(name)) return 'Mongolian';
   if (/[\u0400-\u04FF]/u.test(name)) return 'Russian';
   if (/[\u3040-\u30FF]/u.test(name)) return 'Japanese';
   if (/[\uAC00-\uD7AF]/u.test(name)) return 'Korean';
@@ -745,6 +773,7 @@ function detectSinglePostLanguage(postText) {
     ['Chinese', countChineseChars(evidence), hasStrongChineseLanguageEvidence(evidence) ? 2 : 9999],
     ['Arabic', countPattern(evidence, /[\u0600-\u06FF]/g), 2],
     ['Hindi', countPattern(evidence, /[\u0900-\u097F]/g), 2],
+    ['Mongolian', countPattern(evidence, MONGOLIAN_UNIQUE_CYRILLIC_PATTERN), 1],
     ['Russian', countPattern(evidence, /[\u0400-\u04FF]/g), 2],
     ['Japanese', countPattern(evidence, /[\u3040-\u30FF]/g), 2],
     ['Korean', countPattern(evidence, /[\uAC00-\uD7AF]/g), 2],

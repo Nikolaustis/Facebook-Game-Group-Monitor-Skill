@@ -1,9 +1,9 @@
 ---
-name: fb-group-monitor-v4.2.0
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V4.2.0 支持 Codex 后台启动登录态验证、第一轮抓取和第二轮抓取，启动后应立即把控制权还给用户；第二轮默认每 30 分钟写入/输出 Codex 进度汇报；最终 Excel 报告生成后自动关闭 Chrome；用户明确要求完成后关机时，会通过独立 Node 监控器在锁屏状态下执行强制关机。
+name: fb-group-monitor-v4.3.0
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V4.3.0 支持 Codex 后台启动登录态验证、第一轮抓取和第二轮抓取，启动后应立即把控制权还给用户；第二轮默认每 30 分钟写入/输出 Codex 进度汇报；最终 Excel 报告生成后自动关闭 Chrome；用户明确要求完成后关机时，会通过独立 Node 监控器在锁屏状态下执行强制关机；同时以蒙古语专有西里尔字母与词组优先识别蒙古语，避免误判为俄语。
 ---
 
-# Facebook Group Monitor V4.2.0
+# Facebook Group Monitor V4.3.0
 
 ## 必须先读
 
@@ -151,10 +151,11 @@ source_query, query_variant_type, source_game_name, source_is_seed_url, source_q
 - 按钮、导航、固定提示文案。
 - 空 about 区块的结构标签。
 - 中文界面里的“成员、帖子、简介、讨论”等 UI 文案。
+- 任何西里尔字母文本都不能直接视为俄语：检测到 `Ө/ө`、`Ү/ү` 或高确定性蒙古语词组时，应优先标记 `Mongolian`；仅无蒙古语证据的通用西里尔文本才可标记 `Russian`。群名中英文 `Mongolia` / `Mongolian` 只用于地区，不单独决定语言。
 
 ## 地区判断
 
-V4.1.0 的 `region` 采用“具体国家/地区/属地识别 -> 业务区域归并输出 -> 同大区多命中折叠”的三层规则。
+V4.3.0 的 `region` 采用“具体国家/地区/属地识别 -> 业务区域归并输出 -> 同大区多命中折叠”的三层规则。
 
 单一国家/地区命中时：
 

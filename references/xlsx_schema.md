@@ -18,6 +18,7 @@ snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size
 - `snapshot_date`：文本格式，示例 `2026-05-07`，不得保存为 Excel 日期序列号。
 - `region`：优先由群组名称中的明确国家/地区/属地/大区语义得到，再按业务区域规则归并输出；未命中时可使用允许的高确定性语言映射；若上述链路仍无法确定，才从 About 页明确标注的“所在地 / Location”字段中识别国家/地区或高确定性城市。若多个命中项属于同一业务大区，输出该大区；跨业务大区冲突且 About 所在地也无法解决时留空。
 - `language`：以讨论区前五条可见玩家发言为主，先逐条识别再汇总；若前五条出现两个以上可信语言，标记为 `Mixed`。群名辅助，用户手写 about 非 UI 文本最低优先级兜底。
+- `Mongolian` / `Russian` 区分：`Ө/ө`、`Ү/ү` 或高确定性蒙古语词组优先输出 `Mongolian`；没有蒙古语证据的通用西里尔文本才输出 `Russian`。`Mongolia` / `Mongolian` 等地理词不单独决定语言。
 - `game_name`：用户输入的目标游戏名。
 - `group_name`：Facebook 群组名称。seed URL 候选若第一轮无群名，第二轮应从页面补取。
 - `group_url`：群组链接。
