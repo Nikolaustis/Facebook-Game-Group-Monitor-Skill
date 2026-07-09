@@ -1,9 +1,41 @@
 ---
-name: fb-group-monitor-v4.3.0
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V4.3.0 支持 Codex 后台启动登录态验证、第一轮抓取和第二轮抓取，启动后应立即把控制权还给用户；第二轮默认每 30 分钟写入/输出 Codex 进度汇报；最终 Excel 报告生成后自动关闭 Chrome；用户明确要求完成后关机时，会通过独立 Node 监控器在锁屏状态下执行强制关机；同时以蒙古语专有西里尔字母与词组优先识别蒙古语，避免误判为俄语。
+
+## V5.0.1 GeoNames 修复说明
+
+V5.0.1 修复了 V5.0.0 中 GeoNames 全部返回 `network_error` 的问题。GeoNames endpoint 现在默认使用：
+
+```text
+http://api.geonames.org/searchJSON
+```
+
+如需 HTTPS，可在配置中改为：
+
+```text
+https://secure.geonames.org/searchJSON
+```
+
+不要使用 `https://api.geonames.org/searchJSON`。覆盖后建议删除旧 geocode cache：
+
+```powershell
+Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Force
+```
+
+新增审计字段：`__geocoder_attempted_queries`、`__geocoder_endpoint`、`__geocoder_error_reason`。
+
+name: fb-group-monitor-v5.0.0
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.0.1 支持 Codex 后台启动登录态验证、第一轮抓取和第二轮抓取，启动后应立即把控制权还给用户；第二轮默认每 30 分钟写入/输出 Codex 进度汇报；最终 Excel 报告生成后自动关闭 Chrome；用户明确要求完成后关机时，会通过独立 Node 监控器在锁屏状态下执行强制关机；同时以蒙古语专有西里尔字母与词组优先识别蒙古语，避免误判为俄语。
 ---
 
-# Facebook Group Monitor V4.3.0
+# Facebook Group Monitor V5.0.1
+
+
+## V5.0.1 地区判断新增要求：GeoNames
+
+第二轮在原有地区判断链路失败时，可以调用 GeoNames 作为外部地理验证兜底。不得把整条群名无条件视为地点；应先去除游戏标题、交易/群组/服务器等泛词，再抽取疑似城市、省或州名。
+
+优先级固定为：群名国家/地区/大区关键词 > 群名细粒度地名的 GeoNames 验证 > 高确定性语言映射 > About Location 本地规则 > About Location 的 GeoNames 验证。已经由高优先级规则得到的地区不得被 GeoNames 覆盖。
+
+GeoNames 凭据必须从 `config/local/geonames.local.json` 或 `GEONAMES_USERNAME` 环境变量读取；不要把用户名写入公开任务配置或文档模板。`config/local/*.json` 已由 `.gitignore` 忽略。
 
 ## 必须先读
 
@@ -155,7 +187,7 @@ source_query, query_variant_type, source_game_name, source_is_seed_url, source_q
 
 ## 地区判断
 
-V4.3.0 的 `region` 采用“具体国家/地区/属地识别 -> 业务区域归并输出 -> 同大区多命中折叠”的三层规则。
+V5.0.1 的 `region` 采用“具体国家/地区/属地识别 -> 业务区域归并输出 -> 同大区多命中折叠”的三层规则。
 
 单一国家/地区命中时：
 

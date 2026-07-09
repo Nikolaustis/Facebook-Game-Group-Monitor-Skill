@@ -1,4 +1,136 @@
-# V4.3.0 补丁说明：蒙古语与俄语西里尔文区分
+# V5.0.1 补丁说明：GeoNames endpoint 与错误状态修复
+
+## 修复内容
+
+本版本在 V5.0.0 基础上修复 GeoNames 调用持续 `network_error` 的问题：
+
+- GeoNames endpoint 改为可配置，默认使用 `http://api.geonames.org/searchJSON`。
+- 兼容 `https://secure.geonames.org/searchJSON`，不再使用错误的 `https://api.geonames.org/searchJSON`。
+- 自动按 endpoint 选择 Node `http` / `https` 客户端。
+- GeoNames API 返回错误时不再一律归为 `network_error`，会区分：
+  - `geonames_account_not_enabled`
+  - `geonames_username_error`
+  - `geonames_api_error`
+  - `geonames_http_error`
+  - `geonames_endpoint_error`
+  - `timeout`
+  - `network_error`
+- 临时网络错误、账号未启用、用户名错误、endpoint 错误不再写入 geocode cache，避免一次失败污染后续运行。
+- GeoNames 缓存 key 新增 endpoint 维度，避免切换 `api.geonames.org` / `secure.geonames.org` 后误读旧结果。
+- 改进同名城市歧义判断：对于 `Boston`、`San Diego` 等常见城市，若第一结果在相关性、行政层级和人口规模上明显领先，不再被小型同名地点误判为 `ambiguous`。
+- 新增审计字段：
+  - `__geocoder_attempted_queries`
+  - `__geocoder_endpoint`
+  - `__geocoder_error_reason`
+
+## 覆盖后必须清理旧缓存
+
+V5.0.0 已经把失败结果写入过 `runs/geocode_cache.json`。覆盖 V5.0.1 后，建议先执行：
+
+```powershell
+Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Force
+```
+
+否则旧的 `network_error` 缓存仍可能影响结果。
+
+---
+
+# V5.0.1 补丁说明：GeoNames 外部地理解析兜底
+
+## 新增内容
+
+本版本在 V4.3.0 的基础上新增 GeoNames 外部地理解析接口，用于解决群组名称或 About/简介中的位置颗粒度细化到城市、省、州时，旧版只能依赖固定词典而无法锁定 `region` 的问题。
+
+GeoNames 只作为地区判断的兜底验证层，不替代原有国家/地区关键词规则。默认优先级为：
+
+1. 群组名称中的国家/地区/属地关键词；
+2. 群组名称中的大区关键词；
+3. 当群组名称仍无法给出国家/大区，但疑似包含城市、省或州名时，调用 GeoNames 验证；
+4. 高确定性语言映射；
+5. About 页“所在地 / Location”的原有国家、地区和内置高确定性城市兜底；
+6. 当 About/简介中的所在地仍无法由本地规则判断时，调用 GeoNames 验证。
+
+GeoNames 返回结果必须包含国家代码，并通过置信度和跨国歧义检查后才会写入 `region`。如果结果歧义、低置信度、超时或无结果，Skill 会保留空地区并写入审计字段，不会中断第二轮采集。
+
+## GeoNames 用户名与 GitHub 上传
+
+GeoNames 用户名没有写入公开任务模板。覆盖包将你的用户名放在：
+
+```text
+config/local/geonames.local.json
+```
+
+根目录新增 `.gitignore`，默认忽略：
+
+```text
+config/local/*.json
+.env.local
+```
+
+因此这个本地凭据文件不建议、也不应上传 GitHub。如果你重新整理仓库，只保留 `assets/task_config.template.json` 中的 `local_config_file` 指向即可。
+
+## 新增配置
+
+`assets/task_config.template.json` 新增：
+
+```json
+"external_geocoder": {
+  "enabled": true,
+  "provider": "geonames",
+  "local_config_file": "config/local/geonames.local.json",
+  "username_env": "GEONAMES_USERNAME",
+  "only_when_region_empty": true,
+  "sources": ["group_name", "about_location"],
+  "max_queries_per_group": 4,
+  "max_rows": 5,
+  "min_confidence": 0.75,
+  "ambiguity_margin": 0.04,
+  "timeout_ms": 8000,
+  "rate_limit_ms": 1200,
+  "cache_file": "runs/geocode_cache.json"
+}
+```
+
+也可以不使用本地 JSON，改为 Windows 环境变量：
+
+```powershell
+$env:GEONAMES_USERNAME="Nikolaustis"
+```
+
+## 新增审计字段
+
+正式明细新增：
+
+- `__geocoder_provider`
+- `__geocoder_status`
+- `__geocoder_source`
+- `__geocoder_query`
+- `__geocoder_country_code`
+- `__geocoder_place_name`
+- `__geocoder_admin1`
+- `__geocoder_confidence`
+
+常见 `__geocoder_status`：
+
+- `accepted`：GeoNames 结果通过验证并用于地区判断；
+- `ambiguous`：多个跨国结果接近，未采用；
+- `low_confidence`：返回结果置信度不足，未采用；
+- `no_result`：无可用地理结果；
+- `timeout` / `network_error` / `api_error`：外部接口异常，主采集继续；
+- `not_needed`：原有规则已经确定地区，不需要调用 GeoNames。
+
+## 更新文件
+
+- `scripts/phase2_collect_details.js`
+- `assets/task_config.template.json`
+- `config/local/geonames.local.json`
+- `.gitignore`
+- `package.json`
+- `README.md`、`SKILL.md`、`PATCH_NOTES.md`、`覆盖说明.md`
+
+---
+
+# V5.0.1 补丁说明：蒙古语与俄语西里尔文区分
 
 ## 问题修复
 

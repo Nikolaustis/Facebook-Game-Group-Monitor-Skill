@@ -517,5 +517,24 @@
       "auckland",
       "wellington"
     ]
+  },
+  "external_geocoder": {
+    "enabled": true,
+    "provider": "geonames",
+    "local_config_file": "config/local/geonames.local.json",
+    "username_env": "GEONAMES_USERNAME",
+    "only_when_region_empty": true,
+    "sources": [
+      "group_name",
+      "about_location"
+    ],
+    "max_queries_per_group": 4,
+    "max_rows": 5,
+    "min_confidence": 0.75,
+    "ambiguity_margin": 0.04,
+    "timeout_ms": 8000,
+    "rate_limit_ms": 1200,
+    "cache_file": "runs/geocode_cache.json",
+    "endpoint": "http://api.geonames.org/searchJSON"
   }
 }

@@ -1,8 +1,40 @@
-# FB Game Group Monitor Skill V4.3.0
+# FB Game Group Monitor Skill V5.0.1
+
+## V5.0.1 GeoNames 修复说明
+
+V5.0.1 修复了 V5.0.0 中 GeoNames 全部返回 `network_error` 的问题。GeoNames endpoint 现在默认使用：
+
+```text
+http://api.geonames.org/searchJSON
+```
+
+如需 HTTPS，可在配置中改为：
+
+```text
+https://secure.geonames.org/searchJSON
+```
+
+不要使用 `https://api.geonames.org/searchJSON`。覆盖后建议删除旧 geocode cache：
+
+```powershell
+Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Force
+```
+
+新增审计字段：`__geocoder_attempted_queries`、`__geocoder_endpoint`、`__geocoder_error_reason`。
+
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V4.3.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V4.3.0 同时修正蒙古语被通用西里尔字母规则误判为俄语的问题。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V5.0.1 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.0.1 同时修正蒙古语被通用西里尔字母规则误判为俄语的问题。
+
+
+## V5.0.1 GeoNames 外部地理解析兜底
+
+V5.0.1 在第二轮地区判断中加入 GeoNames。它用于处理群组名称或 About/简介中只出现城市、省、州等细粒度地名的情况，例如 `Ulaanbaatar`、`Cebu`、`California` 这类旧版未必能通过固定词典识别的位置。
+
+调用逻辑是兜底式的：如果群名已经有明确国家/地区/大区，仍按原规则输出；只有原有链路无法确定地区时，才从群名和 About Location 中抽取疑似地名，调用 GeoNames 验证。通过验证后，GeoNames 返回的国家代码会映射为 Skill 的 `region`。歧义、低置信度、超时和无结果都不会中断采集。
+
+GeoNames 用户名放在 `config/local/geonames.local.json`，根目录 `.gitignore` 已默认忽略 `config/local/*.json`，该文件不建议上传 GitHub。
 
 ## 核心能力
 

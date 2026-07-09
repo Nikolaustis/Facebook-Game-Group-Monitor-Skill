@@ -3,6 +3,8 @@ const path = require('path');
 const { chromium } = require('playwright');
 const XLSX = require('xlsx');
 const { execFile, spawn } = require('child_process');
+const http = require('http');
+const https = require('https');
 const { createCodexProgressReporter, parseProgressReportEveryMinutes } = require('./progress_reporter');
 
 let emergencyFlush = null;
@@ -479,6 +481,26 @@ const DEFAULT_COUNTRY_REGION_KEYWORDS = {
     'micronesia', 'palau', 'marshall islands', 'kiribati', 'nauru', 'tuvalu', 'guam', 'new caledonia', 'french polynesia', 'tahiti'
   ],
 };
+
+
+const COUNTRY_CODE_TO_REGION = {
+  CN: 'CN', HK: 'HK', MO: 'MO', TW: 'TW', JP: 'JP', KR: 'KR', KP: 'KP', MN: 'MN',
+  TH: 'TH', VN: 'VN', PH: 'PH', ID: 'ID', MY: 'MY', SG: 'SG', BN: 'BN', LA: 'LA', KH: 'KH', MM: 'MM', TL: 'TL',
+  BR: 'BR', TR: 'TR', NL: 'NL', DE: 'DE', FR: 'FR', IT: 'IT', PL: 'PL', RU: 'RU',
+  US: 'North America', CA: 'North America', GL: 'North America',
+  MX: 'LATAM', AR: 'LATAM', CL: 'LATAM', CO: 'LATAM', PE: 'LATAM', UY: 'LATAM', PY: 'LATAM', BO: 'LATAM', EC: 'LATAM', VE: 'LATAM', PR: 'LATAM',
+  AE: 'Middle East', SA: 'Middle East', QA: 'Middle East', KW: 'Middle East', BH: 'Middle East', OM: 'Middle East', YE: 'Middle East', IQ: 'Middle East', IR: 'Middle East', IL: 'Middle East', JO: 'Middle East', LB: 'Middle East', SY: 'Middle East', PS: 'Middle East', EG: 'Middle East',
+  KZ: 'Central Asia', KG: 'Central Asia', TJ: 'Central Asia', TM: 'Central Asia', UZ: 'Central Asia',
+  IN: 'South Asia', PK: 'South Asia', BD: 'South Asia', LK: 'South Asia', NP: 'South Asia', BT: 'South Asia', MV: 'South Asia', AF: 'South Asia',
+  ZA: 'Africa', NG: 'Africa', KE: 'Africa', GH: 'Africa', ET: 'Africa', MA: 'Africa', DZ: 'Africa', TN: 'Africa', SD: 'Africa', LY: 'Africa',
+  GB: 'EUR', UK: 'EUR', IE: 'EUR', ES: 'EUR', PT: 'EUR', SE: 'EUR', NO: 'EUR', FI: 'EUR', DK: 'EUR', IS: 'EUR', BE: 'EUR', CH: 'EUR', AT: 'EUR', CZ: 'EUR', SK: 'EUR', HU: 'EUR', RO: 'EUR', BG: 'EUR', GR: 'EUR', UA: 'EUR', BY: 'EUR', LT: 'EUR', LV: 'EUR', EE: 'EUR', SI: 'EUR', HR: 'EUR', RS: 'EUR', BA: 'EUR', ME: 'EUR', AL: 'EUR', XK: 'EUR', MK: 'EUR', MD: 'EUR', MT: 'EUR', GE: 'EUR', AM: 'EUR', AZ: 'EUR', CY: 'EUR',
+  AU: 'Oceania', NZ: 'Oceania', PG: 'Oceania', FJ: 'Oceania', WS: 'Oceania', TO: 'Oceania', VU: 'Oceania', SB: 'Oceania', FM: 'Oceania', PW: 'Oceania', MH: 'Oceania', KI: 'Oceania', NR: 'Oceania', TV: 'Oceania', GU: 'Oceania', NC: 'Oceania', PF: 'Oceania',
+};
+
+function regionFromCountryCode(countryCode) {
+  const cc = clean(countryCode).toUpperCase();
+  return normalizeRegionOutput(COUNTRY_CODE_TO_REGION[cc] || '');
+}
 
 const DEFAULT_DIRECT_REGION_KEYWORDS = {
   EA: ['east asia', 'eastern asia', 'east asian', '东亚', '東亞'],
@@ -1003,6 +1025,638 @@ function detectRegionByAboutLocation(locationText, countryRegionKeywords, direct
   if (directRegionMatch.source === 'keyword_conflict') return { ...directRegionMatch, source: 'about_location_keyword_conflict' };
 
   return { region: '', source: '', keyword_hits: [] };
+}
+
+
+function readJsonIfExists(file) {
+  try {
+    if (file && fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (_err) {
+    return null;
+  }
+  return null;
+}
+
+function resolveConfigPathMaybe(file, baseDir) {
+  const f = clean(file || '');
+  if (!f) return '';
+  if (path.isAbsolute(f)) return f;
+  const candidates = [
+    path.resolve(process.cwd(), f),
+    baseDir ? path.resolve(baseDir, f) : '',
+  ].filter(Boolean);
+  return candidates.find((x) => fs.existsSync(x)) || candidates[0] || '';
+}
+
+function mergeExternalGeocoderConfig(config, configFile, outDir) {
+  const baseDir = configFile ? path.dirname(configFile) : process.cwd();
+  const external = config.external_geocoder && typeof config.external_geocoder === 'object'
+    ? { ...config.external_geocoder }
+    : {};
+  const localConfigFile = resolveConfigPathMaybe(
+    external.local_config_file || config.external_geocoder_local_config || 'config/local/geonames.local.json',
+    baseDir,
+  );
+  const local = readJsonIfExists(localConfigFile);
+  const localExternal = local && local.external_geocoder && typeof local.external_geocoder === 'object'
+    ? local.external_geocoder
+    : (local && typeof local === 'object' ? local : {});
+  const merged = { ...external, ...localExternal };
+  if (!merged.provider) merged.provider = 'geonames';
+  if (!merged.endpoint) merged.endpoint = 'http://api.geonames.org/searchJSON';
+  if (merged.enabled === undefined) merged.enabled = false;
+  if (!merged.username && merged.username_env) merged.username = process.env[clean(merged.username_env)] || '';
+  if (!merged.username && process.env.GEONAMES_USERNAME) merged.username = process.env.GEONAMES_USERNAME;
+  merged.enabled = boolLike(merged.enabled, false);
+  merged.only_when_region_empty = boolLike(merged.only_when_region_empty, true);
+  merged.sources = Array.isArray(merged.sources) && merged.sources.length ? merged.sources.map((x) => clean(x)).filter(Boolean) : ['group_name', 'about_location'];
+  merged.max_queries_per_group = Math.max(1, Math.min(8, Number(merged.max_queries_per_group || 4)));
+  merged.max_rows = Math.max(1, Math.min(10, Number(merged.max_rows || 5)));
+  merged.timeout_ms = Math.max(1000, Number(merged.timeout_ms || 8000));
+  merged.rate_limit_ms = Math.max(0, Number(merged.rate_limit_ms || 1200));
+  merged.min_confidence = Math.max(0, Math.min(1, Number(merged.min_confidence || 0.75)));
+  merged.ambiguity_margin = Math.max(0, Math.min(1, Number(merged.ambiguity_margin || 0.04)));
+  merged.cache_file = resolveConfigPathMaybe(merged.cache_file || path.join(outDir || process.cwd(), 'geocode_cache.json'), baseDir);
+  merged.endpoint = clean(merged.endpoint || 'http://api.geonames.org/searchJSON');
+  merged.local_config_file = localConfigFile;
+  return merged;
+}
+
+function boolLike(raw, defaultValue) {
+  if (raw === undefined || raw === null || raw === '') return defaultValue;
+  if (typeof raw === 'boolean') return raw;
+  const s = String(raw).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(s)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(s)) return false;
+  return defaultValue;
+}
+
+class GeocodeCache {
+  constructor(file) {
+    this.file = file;
+    this.data = readJsonIfExists(file) || {};
+    if (!this.data || typeof this.data !== 'object' || Array.isArray(this.data)) this.data = {};
+  }
+  get(key) {
+    return this.data[key] || null;
+  }
+  set(key, value) {
+    this.data[key] = { ...value, cached_at: new Date().toISOString() };
+    try { writeJsonAtomic(this.file, this.data); } catch (_err) { /* cache failure must not stop collection */ }
+  }
+}
+
+function normalizeGeocoderQuery(s) {
+  return stripDiacritics(clean(s))
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\u{1F300}-\u{1FAFF}]/gu, ' ')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/[“”"'`]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isUnsafeShortLocationToken(q) {
+  const text = clean(q);
+  if (!text) return true;
+  const norm = normalizeGeocoderQuery(text);
+  if (norm.length < 3) return true;
+  if (/^[a-z]{2}$/i.test(norm)) return true;
+  if (/^\d+$/.test(norm)) return true;
+  return false;
+}
+
+const GEOCODER_GROUP_NAME_STOPWORDS = new Set([
+  'official','fan','fans','group','groups','community','server','servers','global','international','world','worldwide',
+  'trade','trading','buy','sell','sale','market','marketplace','help','tips','guide','guild','clan','team','players','player',
+  'game','games','gaming','mobile','online','roblox','facebook','fb','new','old','v1','v2','v3','officials','admin','admins',
+  'exchange','giveaway','code','codes','event','events','chat','discussion','only','all','real','main','backup'
+]);
+
+function removeKnownTitleWords(words, titles) {
+  const remove = new Set();
+  for (const title of titles || []) {
+    for (const w of normalizeWords(title).split(/\s+/).filter(Boolean)) {
+      if (w.length >= 2) remove.add(w);
+    }
+  }
+  return words.filter((w) => !remove.has(w));
+}
+
+function extractGeocoderQueriesFromGroupName(groupName, gameName, allGameNames, maxQueries) {
+  const text = clean(groupName || '');
+  if (!text) return [];
+  const titles = unique([gameName].concat(allGameNames || [])).filter(Boolean);
+  let normalized = normalizeGeocoderQuery(text)
+    .replace(/[|/\\•·:;()[\]{}<>]+/g, ' ')
+    .replace(/\b(v\d+|s\d+|season\s*\d+)\b/gi, ' ');
+  let words = normalized.split(/\s+/).filter(Boolean);
+  words = removeKnownTitleWords(words, titles)
+    .filter((w) => !GEOCODER_GROUP_NAME_STOPWORDS.has(w))
+    .filter((w) => !/^\d+$/.test(w));
+
+  const candidates = [];
+  const cleanedRemainder = clean(words.join(' '));
+  if (cleanedRemainder) candidates.push(cleanedRemainder);
+
+  // Try compact 1-4 word windows from the remaining non-game text. This catches city/state
+  // fragments such as "ho chi minh" even when the group name also contains trading words.
+  for (let size = Math.min(4, words.length); size >= 1; size--) {
+    for (let i = 0; i + size <= words.length; i++) {
+      candidates.push(words.slice(i, i + size).join(' '));
+    }
+  }
+
+  return unique(candidates)
+    .map((x) => clean(x))
+    .filter((x) => !isUnsafeShortLocationToken(x))
+    .filter((x) => x.length <= 80)
+    .slice(0, Math.max(1, maxQueries || 4));
+}
+
+function extractGeocoderQueriesFromAboutLocation(aboutLocationText, maxQueries) {
+  const text = clean(aboutLocationText || '');
+  if (!text) return [];
+  const stripped = normalizeGeocoderQuery(text)
+    .replace(/\b(location|located in|lives in|from|city|province|state|region|area)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const parts = unique([stripped]
+    .concat(stripped.split(/[,;|/\\•·()\[\]{}<>]+/g))
+    .map((x) => clean(x))
+    .filter(Boolean));
+  return parts
+    .filter((x) => !isUnsafeShortLocationToken(x))
+    .filter((x) => x.length <= 100)
+    .slice(0, Math.max(1, maxQueries || 4));
+}
+
+function normalizeGeonamesEndpoint(rawEndpoint) {
+  const raw = clean(rawEndpoint || 'http://api.geonames.org/searchJSON');
+  if (!raw) return 'http://api.geonames.org/searchJSON';
+  // Accept either a full searchJSON URL or a GeoNames host/base endpoint.
+  if (/^https?:\/\//i.test(raw)) {
+    const trimmed = raw.replace(/\/+$/g, '');
+    return /\/searchJSON$/i.test(trimmed) ? trimmed : `${trimmed}/searchJSON`;
+  }
+  return 'http://api.geonames.org/searchJSON';
+}
+
+function classifyGeoNamesApiError(json, httpStatus) {
+  const status = json && json.status && typeof json.status === 'object' ? json.status : null;
+  if (!status) return { status: 'geonames_api_error', reason: '', value: '' };
+  const value = status.value === undefined || status.value === null ? '' : String(status.value);
+  const reason = clean(status.message || status.error || '');
+  if (value === '10' || /not enabled/i.test(reason)) {
+    return { status: 'geonames_account_not_enabled', reason, value, http_status: httpStatus };
+  }
+  if (/invalid username|user does not exist|username/i.test(reason)) {
+    return { status: 'geonames_username_error', reason, value, http_status: httpStatus };
+  }
+  return { status: 'geonames_api_error', reason, value, http_status: httpStatus };
+}
+
+function geonamesRequest(query, username, maxRows, timeoutMs, endpoint) {
+  return new Promise((resolve) => {
+    const params = new URLSearchParams({
+      q: query,
+      maxRows: String(maxRows || 5),
+      username,
+      type: 'json',
+      style: 'FULL',
+      isNameRequired: 'true',
+      orderby: 'relevance',
+    });
+
+    let url;
+    try {
+      url = new URL(normalizeGeonamesEndpoint(endpoint));
+      for (const [k, v] of params.entries()) url.searchParams.set(k, v);
+    } catch (err) {
+      resolve({ ok: false, status: 'geonames_endpoint_error', reason: err && err.message ? err.message : String(err) });
+      return;
+    }
+
+    const client = url.protocol === 'http:' ? http : https;
+    const req = client.get(url, { timeout: timeoutMs || 8000 }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        let json = null;
+        try {
+          json = JSON.parse(body || '{}');
+        } catch (err) {
+          resolve({
+            ok: false,
+            status: 'parse_error',
+            reason: err && err.message ? err.message : String(err),
+            http_status: res.statusCode,
+            endpoint: `${url.protocol}//${url.host}${url.pathname}`,
+          });
+          return;
+        }
+
+        if (json.status && json.status.message) {
+          resolve({
+            ok: false,
+            ...classifyGeoNamesApiError(json, res.statusCode),
+            endpoint: `${url.protocol}//${url.host}${url.pathname}`,
+          });
+          return;
+        }
+
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          resolve({
+            ok: false,
+            status: 'geonames_http_error',
+            reason: `HTTP ${res.statusCode}`,
+            http_status: res.statusCode,
+            endpoint: `${url.protocol}//${url.host}${url.pathname}`,
+          });
+          return;
+        }
+
+        resolve({
+          ok: true,
+          status: 'ok',
+          json,
+          http_status: res.statusCode,
+          endpoint: `${url.protocol}//${url.host}${url.pathname}`,
+        });
+      });
+    });
+    req.on('timeout', () => {
+      req.destroy(new Error('timeout'));
+    });
+    req.on('error', (err) => {
+      resolve({
+        ok: false,
+        status: err && err.message === 'timeout' ? 'timeout' : 'network_error',
+        reason: err && err.message ? err.message : String(err),
+        endpoint: endpoint || '',
+      });
+    });
+  });
+}
+
+function isAcceptableGeoNamesFeature(row) {
+  const fcl = clean(row.fcl || '').toUpperCase();
+  const fcode = clean(row.fcode || '').toUpperCase();
+  if (fcl === 'P') return true; // populated place: city/town/village
+  if (fcl === 'A') return true; // administrative area / country
+  if (['PCLI', 'PCLD', 'PCLF', 'PCLS', 'ADM1', 'ADM2', 'ADM3', 'ADM4'].includes(fcode)) return true;
+  return false;
+}
+
+function geoPopulation(row) {
+  const n = Number(row && row.population);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function featureRank(row) {
+  const fcl = clean(row && row.fcl || '').toUpperCase();
+  const fcode = clean(row && row.fcode || '').toUpperCase();
+  if (fcode === 'PCLI') return 0.035;
+  if (fcode === 'ADM1') return 0.030;
+  if (fcode === 'ADM2') return 0.022;
+  if (fcl === 'P') return 0.020;
+  if (fcl === 'A') return 0.015;
+  return 0;
+}
+
+function geonamesConfidence(query, row, rankIndex = 0) {
+  const q = normalizeGeocoderQuery(query);
+  const names = [row.name, row.toponymName, row.asciiName]
+    .concat(String(row.alternateNames || '').split(','))
+    .map((x) => normalizeGeocoderQuery(x))
+    .filter(Boolean);
+  let base = 0.50;
+  if (names.some((n) => n === q)) base = 0.94;
+  else if (names.some((n) => n.startsWith(`${q} `) || q.startsWith(`${n} `))) base = 0.86;
+  else if (names.some((n) => n.includes(q) || q.includes(n))) base = 0.78;
+
+  const providerScore = Number(row.score || 0);
+  if (Number.isFinite(providerScore) && providerScore > 0) base = Math.max(base, Math.min(0.84, 0.55 + providerScore / 100));
+
+  // GeoNames already sorts by relevance. Add a small rank/population/admin bonus so that
+  // common cases like Boston, Paris, Salem, or San Diego do not become falsely ambiguous
+  // merely because a tiny same-name place exists in another country.
+  const popBonus = Math.min(0.035, Math.log10(geoPopulation(row) + 1) / 220);
+  const rankBonus = Math.max(0, 0.018 - rankIndex * 0.004);
+  return Math.min(0.99, base + featureRank(row) + popBonus + rankBonus);
+}
+
+function isMaterialGeoConflict(top, challenger, ambiguityMargin) {
+  if (!challenger || challenger.country_code === top.country_code) return false;
+  if (challenger.confidence < top.confidence - ambiguityMargin) return false;
+
+  const topPop = geoPopulation(top.row);
+  const challengerPop = geoPopulation(challenger.row);
+  const topFcode = clean(top.row.fcode || '').toUpperCase();
+  const challengerFcode = clean(challenger.row.fcode || '').toUpperCase();
+
+  // Countries and first-level administrative areas are high-level enough that close
+  // cross-country matches should remain ambiguous.
+  if (['PCLI', 'ADM1'].includes(topFcode) && ['PCLI', 'ADM1'].includes(challengerFcode)) return true;
+
+  // For city names, only treat another country as a conflict if it is not a tiny
+  // same-name place relative to the top result.
+  if (topPop && challengerPop && challengerPop >= Math.max(50000, topPop * 0.35)) return true;
+  if (!topPop && !challengerPop) return true;
+  return false;
+}
+
+function evaluateGeonamesResults(query, response, minConfidence, ambiguityMargin) {
+  if (!response.ok) {
+    return {
+      status: response.status || 'geonames_api_error',
+      reason: response.reason || '',
+      query,
+      http_status: response.http_status || '',
+      endpoint: response.endpoint || '',
+      api_error_value: response.value || '',
+    };
+  }
+  const rows = Array.isArray(response.json?.geonames) ? response.json.geonames : [];
+  const candidates = rows
+    .filter((row) => row && row.countryCode && isAcceptableGeoNamesFeature(row))
+    .map((row, idx) => ({
+      row,
+      country_code: clean(row.countryCode).toUpperCase(),
+      region: regionFromCountryCode(row.countryCode),
+      confidence: geonamesConfidence(query, row, idx),
+    }))
+    .filter((x) => x.region && x.confidence >= Math.max(0, minConfidence - 0.12))
+    .sort((a, b) => b.confidence - a.confidence);
+
+  if (!candidates.length) return { status: 'no_result', query, endpoint: response.endpoint || '' };
+  const top = candidates[0];
+  if (top.confidence < minConfidence) {
+    return {
+      status: 'low_confidence',
+      query,
+      confidence: top.confidence,
+      country_code: top.country_code,
+      place_name: clean(top.row.name || top.row.toponymName || ''),
+      endpoint: response.endpoint || '',
+    };
+  }
+  const conflicting = candidates.find((x) => isMaterialGeoConflict(top, x, ambiguityMargin));
+  if (conflicting) {
+    return {
+      status: 'ambiguous',
+      query,
+      confidence: top.confidence,
+      country_code: top.country_code,
+      place_name: clean(top.row.name || top.row.toponymName || ''),
+      conflict_country_code: conflicting.country_code,
+      conflict_place_name: clean(conflicting.row.name || conflicting.row.toponymName || ''),
+      endpoint: response.endpoint || '',
+    };
+  }
+  return {
+    status: 'accepted',
+    query,
+    region: top.region,
+    country_code: top.country_code,
+    place_name: clean(top.row.name || top.row.toponymName || ''),
+    admin1: clean(top.row.adminName1 || ''),
+    feature_code: clean(top.row.fcode || ''),
+    feature_class: clean(top.row.fcl || ''),
+    confidence: top.confidence,
+    geoname_id: top.row.geonameId || '',
+    endpoint: response.endpoint || '',
+  };
+}
+
+async function sleepMs(ms) {
+  if (!ms) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
+  if (!externalGeocoder || !externalGeocoder.enabled) return { status: 'disabled', source, query };
+  if (clean(externalGeocoder.provider).toLowerCase() !== 'geonames') return { status: 'unsupported_provider', source, query };
+  const username = clean(externalGeocoder.username || '');
+  if (!username) return { status: 'missing_username', source, query };
+  const normalizedQuery = normalizeGeocoderQuery(query);
+  if (isUnsafeShortLocationToken(normalizedQuery)) return { status: 'unsafe_query', source, query: normalizedQuery };
+  const endpointKey = normalizeGeonamesEndpoint(externalGeocoder.endpoint);
+  const cacheKey = `geonames|${endpointKey}|${normalizedQuery}`;
+  const cached = cache ? cache.get(cacheKey) : null;
+  if (cached) {
+    if (stats) stats.external_geocoder_cache_hits = (stats.external_geocoder_cache_hits || 0) + 1;
+    return { ...cached, cached: true, source, query: normalizedQuery };
+  }
+  if (stats) stats.external_geocoder_requests = (stats.external_geocoder_requests || 0) + 1;
+  const response = await geonamesRequest(normalizedQuery, username, externalGeocoder.max_rows, externalGeocoder.timeout_ms, externalGeocoder.endpoint);
+  const evaluated = evaluateGeonamesResults(normalizedQuery, response, externalGeocoder.min_confidence, externalGeocoder.ambiguity_margin);
+  const out = { ...evaluated, provider: 'geonames', source, query: normalizedQuery };
+  if (cache && !['network_error', 'timeout', 'geonames_account_not_enabled', 'geonames_username_error', 'geonames_http_error', 'geonames_endpoint_error', 'parse_error'].includes(out.status)) cache.set(cacheKey, out);
+  await sleepMs(externalGeocoder.rate_limit_ms);
+  return out;
+}
+
+async function runExternalGeocoderFallback({
+  groupName,
+  aboutLocationText,
+  gameName,
+  allGameNames,
+  externalGeocoder,
+  geocodeCache,
+  stats,
+  preferredSources,
+}) {
+  if (!externalGeocoder || !externalGeocoder.enabled) return { status: 'disabled' };
+  const sources = Array.isArray(preferredSources) && preferredSources.length ? preferredSources : externalGeocoder.sources;
+  const querySpecs = [];
+  if (sources.includes('group_name')) {
+    for (const q of extractGeocoderQueriesFromGroupName(groupName, gameName, allGameNames, externalGeocoder.max_queries_per_group)) {
+      querySpecs.push({ source: 'group_name', query: q });
+    }
+  }
+  if (sources.includes('about_location')) {
+    for (const q of extractGeocoderQueriesFromAboutLocation(aboutLocationText, externalGeocoder.max_queries_per_group)) {
+      querySpecs.push({ source: 'about_location', query: q });
+    }
+  }
+  const uniqueSpecs = [];
+  const seen = new Set();
+  for (const spec of querySpecs) {
+    const key = `${spec.source}|${normalizeGeocoderQuery(spec.query)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueSpecs.push(spec);
+  }
+  if (!uniqueSpecs.length) return { status: 'no_candidate_query' };
+
+  let last = { status: 'no_result' };
+  const attemptedQueries = [];
+  for (const spec of uniqueSpecs.slice(0, externalGeocoder.max_queries_per_group)) {
+    if (stats) stats.external_geocoder_attempted = (stats.external_geocoder_attempted || 0) + 1;
+    const result = await geocodeQuery(spec.query, spec.source, externalGeocoder, geocodeCache, stats);
+    attemptedQueries.push(`${spec.source}:${normalizeGeocoderQuery(spec.query)}=${result.status}`);
+    last = { ...result, attempted_queries: attemptedQueries.join(' | ') };
+    if (result.status === 'accepted' && result.region) {
+      if (stats) stats.external_geocoder_accepted = (stats.external_geocoder_accepted || 0) + 1;
+      return { ...result, attempted_queries: attemptedQueries.join(' | ') };
+    }
+    if (result.status === 'ambiguous') {
+      if (stats) stats.external_geocoder_ambiguous = (stats.external_geocoder_ambiguous || 0) + 1;
+      return { ...result, attempted_queries: attemptedQueries.join(' | ') };
+    }
+    if (['geonames_api_error', 'geonames_account_not_enabled', 'geonames_username_error', 'geonames_http_error', 'geonames_endpoint_error', 'network_error', 'timeout', 'parse_error'].includes(result.status)) {
+      if (stats) stats.external_geocoder_errors = (stats.external_geocoder_errors || 0) + 1;
+    } else if (result.status === 'no_result' || result.status === 'low_confidence') {
+      if (stats) stats.external_geocoder_no_result = (stats.external_geocoder_no_result || 0) + 1;
+    }
+  }
+  return last;
+}
+
+function geocoderAuditFields(geo) {
+  const g = geo || {};
+  return {
+    __geocoder_provider: g.provider || '',
+    __geocoder_status: g.status || '',
+    __geocoder_source: g.source || '',
+    __geocoder_query: g.query || '',
+    __geocoder_attempted_queries: g.attempted_queries || '',
+    __geocoder_endpoint: g.endpoint || '',
+    __geocoder_error_reason: g.reason || '',
+    __geocoder_country_code: g.country_code || '',
+    __geocoder_place_name: g.place_name || '',
+    __geocoder_admin1: g.admin1 || '',
+    __geocoder_confidence: g.confidence === undefined || g.confidence === null ? '' : String(Number(g.confidence).toFixed(2)),
+  };
+}
+
+async function resolveRegionV5({
+  groupName,
+  languageSignal,
+  languageToRegion,
+  countryRegionKeywords,
+  directRegionKeywords,
+  aboutLocationCityKeywords,
+  aboutLocationText,
+  externalGeocoder,
+  geocodeCache,
+  stats,
+  gameName,
+  allGameNames,
+}) {
+  const normalizedLocation = clean(aboutLocationText || '');
+  const groupNameMatch = detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords);
+
+  if (groupNameMatch.source && groupNameMatch.source !== 'keyword_conflict' && groupNameMatch.region) {
+    return {
+      region: normalizeRegionOutput(groupNameMatch.region),
+      source: groupNameMatch.source,
+      group_name_match: groupNameMatch,
+      about_location_match: { region: '', source: '', keyword_hits: [] },
+      about_location: normalizedLocation,
+      used_about_location: false,
+      external_geocoder: { status: 'not_needed' },
+    };
+  }
+
+  // V5: when group name contains a finer-grained place but no country/region keyword,
+  // verify it with GeoNames before falling back to language. If the group name already has
+  // explicit cross-region keyword conflict, do not let a fuzzy group-name query override it;
+  // a clear About > Location value may still resolve the conflict later.
+  const geoGroup = groupNameMatch.source === 'keyword_conflict'
+    ? { status: 'skipped_keyword_conflict' }
+    : await runExternalGeocoderFallback({
+      groupName,
+      aboutLocationText: '',
+      gameName,
+      allGameNames,
+      externalGeocoder,
+      geocodeCache,
+      stats,
+      preferredSources: ['group_name'],
+    });
+  if (geoGroup.status === 'accepted' && geoGroup.region) {
+    return {
+      region: normalizeRegionOutput(geoGroup.region),
+      source: 'external_geocoder_group_name',
+      group_name_match: groupNameMatch,
+      about_location_match: { region: '', source: '', keyword_hits: [] },
+      about_location: normalizedLocation,
+      used_about_location: false,
+      external_geocoder: geoGroup,
+    };
+  }
+
+  const existingRegion = mapRegion(languageSignal, languageToRegion, groupNameMatch);
+  if (existingRegion) {
+    return {
+      region: existingRegion,
+      source: groupNameMatch.source || 'language_map',
+      group_name_match: groupNameMatch,
+      about_location_match: { region: '', source: '', keyword_hits: [] },
+      about_location: normalizedLocation,
+      used_about_location: false,
+      external_geocoder: geoGroup.status && geoGroup.status !== 'disabled' && geoGroup.status !== 'no_candidate_query' ? geoGroup : { status: 'not_needed' },
+    };
+  }
+
+  const aboutLocationMatch = detectRegionByAboutLocation(
+    normalizedLocation,
+    countryRegionKeywords,
+    directRegionKeywords,
+    aboutLocationCityKeywords,
+  );
+  if (aboutLocationMatch.source && aboutLocationMatch.source !== 'about_location_keyword_conflict' && aboutLocationMatch.region) {
+    return {
+      region: normalizeRegionOutput(aboutLocationMatch.region),
+      source: aboutLocationMatch.source,
+      group_name_match: groupNameMatch,
+      about_location_match: aboutLocationMatch,
+      about_location: normalizedLocation,
+      used_about_location: true,
+      external_geocoder: geoGroup.status && geoGroup.status !== 'disabled' && geoGroup.status !== 'no_candidate_query' ? geoGroup : { status: 'not_needed' },
+    };
+  }
+
+  // V5: if About > Location contains a city/province/state not covered by the small local
+  // city table, verify it with GeoNames as the final region fallback.
+  const geoAbout = await runExternalGeocoderFallback({
+    groupName: '',
+    aboutLocationText: normalizedLocation,
+    gameName,
+    allGameNames,
+    externalGeocoder,
+    geocodeCache,
+    stats,
+    preferredSources: ['about_location'],
+  });
+  if (geoAbout.status === 'accepted' && geoAbout.region) {
+    return {
+      region: normalizeRegionOutput(geoAbout.region),
+      source: 'external_geocoder_about_location',
+      group_name_match: groupNameMatch,
+      about_location_match: aboutLocationMatch,
+      about_location: normalizedLocation,
+      used_about_location: true,
+      external_geocoder: geoAbout,
+    };
+  }
+
+  const external_geocoder = geoAbout.status && geoAbout.status !== 'disabled' && geoAbout.status !== 'no_candidate_query'
+    ? geoAbout
+    : (geoGroup.status && geoGroup.status !== 'disabled' && geoGroup.status !== 'no_candidate_query' ? geoGroup : { status: geoAbout.status || geoGroup.status || '' });
+  return {
+    region: '',
+    source: external_geocoder.status === 'ambiguous' ? 'external_geocoder_ambiguous' : (aboutLocationMatch.source || groupNameMatch.source || ''),
+    group_name_match: groupNameMatch,
+    about_location_match: aboutLocationMatch,
+    about_location: normalizedLocation,
+    used_about_location: false,
+    external_geocoder,
+  };
 }
 
 function formatRegionKeywordHits(groupNameMatch, aboutLocationMatch) {
@@ -2053,6 +2707,8 @@ function resolveCollisions(rows) {
   const allowedRegions = Array.isArray(config.allowed_regions)
     ? new Set(config.allowed_regions.map((x) => normalizeRegionOutput(x)).filter(Boolean))
     : null;
+  const externalGeocoder = mergeExternalGeocoderConfig(config, configFile, path.dirname(outXlsx));
+  const geocodeCache = new GeocodeCache(externalGeocoder.cache_file);
 
   const index = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
   const gameEntries = Array.isArray(index.games) ? index.games : [];
@@ -2118,6 +2774,14 @@ function resolveCollisions(rows) {
       dropped_collision: 0,
       manual_review_rows: 0,
       output_rows: 0,
+      external_geocoder_enabled: externalGeocoder.enabled ? 1 : 0,
+      external_geocoder_attempted: 0,
+      external_geocoder_requests: 0,
+      external_geocoder_cache_hits: 0,
+      external_geocoder_accepted: 0,
+      external_geocoder_ambiguous: 0,
+      external_geocoder_no_result: 0,
+      external_geocoder_errors: 0,
       game_breakdown: {},
     };
     const formulaFields = {
@@ -2146,6 +2810,17 @@ function resolveCollisions(rows) {
       '__region_source',
       '__region_keyword_hits',
       '__region_location',
+      '__geocoder_provider',
+      '__geocoder_status',
+      '__geocoder_source',
+      '__geocoder_query',
+      '__geocoder_attempted_queries',
+      '__geocoder_endpoint',
+      '__geocoder_error_reason',
+      '__geocoder_country_code',
+      '__geocoder_place_name',
+      '__geocoder_admin1',
+      '__geocoder_confidence',
     ];
     let currentGameName = '';
     let currentGameIndex = -1;
@@ -2404,7 +3079,7 @@ function resolveCollisions(rows) {
         const thresholdSpec = thresholdSpecForMatch(match, threshold);
         let languageSignal = detectLanguageSignalFromEvidence(candidateGroupName, aboutLanguageText, '', '');
         const aboutLocationText = clean(about.location_text || '');
-        let regionResolution = resolveRegionWithAboutLocationFallback({
+        let regionResolution = await resolveRegionV5({
           groupName: candidateGroupName,
           languageSignal,
           languageToRegion,
@@ -2412,6 +3087,11 @@ function resolveCollisions(rows) {
           directRegionKeywords,
           aboutLocationCityKeywords,
           aboutLocationText,
+          externalGeocoder,
+          geocodeCache,
+          stats,
+          gameName,
+          allGameNames,
         });
         let region = regionResolution.region;
 
@@ -2445,6 +3125,7 @@ function resolveCollisions(rows) {
           __region_source: regionResolution.source || '',
           __region_keyword_hits: formatRegionKeywordHits(regionResolution.group_name_match, regionResolution.about_location_match),
           __region_location: aboutLocationText,
+          ...geocoderAuditFields(regionResolution.external_geocoder),
         };
 
         if (match.manual_review) {
@@ -2507,7 +3188,7 @@ function resolveCollisions(rows) {
           discussionLanguage.ok ? discussionLanguage.text : '',
           ''
         );
-        regionResolution = resolveRegionWithAboutLocationFallback({
+        regionResolution = await resolveRegionV5({
           groupName: candidateGroupName,
           languageSignal,
           languageToRegion,
@@ -2515,6 +3196,11 @@ function resolveCollisions(rows) {
           directRegionKeywords,
           aboutLocationCityKeywords,
           aboutLocationText,
+          externalGeocoder,
+          geocodeCache,
+          stats,
+          gameName,
+          allGameNames,
         });
         region = regionResolution.region;
         row.language_signal = languageSignal;
@@ -2522,6 +3208,7 @@ function resolveCollisions(rows) {
         row.__region_source = regionResolution.source || '';
         row.__region_keyword_hits = formatRegionKeywordHits(regionResolution.group_name_match, regionResolution.about_location_match);
         row.__region_location = aboutLocationText;
+        Object.assign(row, geocoderAuditFields(regionResolution.external_geocoder));
 
         if (allowedLanguageSignals && allowedLanguageSignals.size && !allowedLanguageSignals.has(row.language_signal)) {
           stats.dropped_lang_region++;
