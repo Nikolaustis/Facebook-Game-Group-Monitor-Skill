@@ -410,7 +410,7 @@ const DEFAULT_COUNTRY_REGION_KEYWORDS = {
   VN: ['vn', 'viet nam', 'vietnam', 'việt nam'],
   PH: ['ph', 'pinoy', 'philippines', 'pilipinas'],
   ID: ['id', 'indo', 'indonesia'],
-  MY: ['malaysia', 'malay', 'melayu'],
+  MY: ['malaysia', 'malay', 'melayu', '大马', '大馬', '马来西亚', '馬來西亞'],
   SG: ['sg', 'singapore'],
   BN: ['brunei'],
   LA: ['laos', 'lao'],
@@ -434,8 +434,9 @@ const DEFAULT_COUNTRY_REGION_KEYWORDS = {
   // South Asia.
   'South Asia': ['india', 'bharat', 'pakistan', 'bangladesh', 'sri lanka', 'nepal', 'bhutan', 'maldives', 'afghanistan'],
 
-  // North America.
-  'North America': ['usa', 'u.s.', 'u.s.a.', 'united states', 'canada', 'greenland'],
+  // North America. Québec is a high-confidence province/city name and should never be
+  // lost behind the French/Spanish preposition "de".
+  'North America': ['us', 'usa', 'u.s.', 'u.s.a.', 'united states', 'ca', 'canada', 'gl', 'greenland', 'quebec', 'québec'],
 
   // LATAM: all Americas except US / Canada / Greenland / Brazil; includes listed territories.
   LATAM: [
@@ -460,17 +461,17 @@ const DEFAULT_COUNTRY_REGION_KEYWORDS = {
   ],
 
   // Europe: Turkey / Netherlands / Germany / France / Italy / Poland / Russia are kept separate.
-  TR: ['turkey', 'turkiye', 'türkiye', 'turkish', 'türk', 'turkce'],
-  NL: ['netherlands', 'holland', 'dutch', 'nederland'],
-  DE: ['germany', 'deutschland', 'german', 'deutsch'],
-  FR: ['france', 'french', 'français', 'francais'],
-  IT: ['italy', 'italia', 'italian', 'italiano'],
-  PL: ['poland', 'polska', 'polish', 'polski'],
-  RU: ['russia', 'russian', 'россия', 'русский'],
+  TR: ['tr', 'turkey', 'turkiye', 'türkiye', 'turkish', 'türk', 'turkce'],
+  NL: ['nl', 'netherlands', 'holland', 'dutch', 'nederland'],
+  DE: ['de', 'germany', 'deutschland', 'german', 'deutsch'],
+  FR: ['fr', 'france', 'french', 'français', 'francais'],
+  IT: ['it', 'italy', 'italia', 'italian', 'italiano'],
+  PL: ['pl', 'poland', 'polska', 'polish', 'polski', 'trójmiasto', 'trojmiasto'],
+  RU: ['ru', 'russia', 'russian', 'россия', 'русский'],
   EUR: [
     'united kingdom', 'uk', 'u.k.', 'great britain', 'britain', 'england', 'scotland', 'wales', 'ireland',
-    'spain', 'espana', 'españa', 'portugal', 'sweden', 'norway', 'finland', 'denmark', 'iceland',
-    'belgium', 'belgie', 'belgië', 'switzerland', 'austria', 'czech republic', 'czechia', 'slovakia', 'hungary', 'romania', 'bulgaria', 'greece',
+    'spain', 'espana', 'españa', 'portugal', 'sweden', 'sverige', 'norway', 'finland', 'denmark', 'danmark', 'iceland',
+    'belgium', 'belgique', 'belgie', 'belgië', 'belgien', 'switzerland', 'schweiz', 'austria', 'czech republic', 'czechia', 'czech', 'česko', 'cesko', 'cz', 'slovakia', 'slovak', 'slovensko', 'sk', 'cz/sk', 'hungary', 'romania', 'bulgaria', 'greece',
     'ukraine', 'belarus', 'lithuania', 'latvia', 'estonia', 'slovenia', 'croatia', 'serbia', 'bosnia', 'montenegro', 'albania', 'kosovo', 'north macedonia', 'moldova', 'malta',
     'georgia', 'armenia', 'azerbaijan', 'cyprus'
   ],
@@ -496,6 +497,17 @@ const COUNTRY_CODE_TO_REGION = {
   GB: 'EUR', UK: 'EUR', IE: 'EUR', ES: 'EUR', PT: 'EUR', SE: 'EUR', NO: 'EUR', FI: 'EUR', DK: 'EUR', IS: 'EUR', BE: 'EUR', CH: 'EUR', AT: 'EUR', CZ: 'EUR', SK: 'EUR', HU: 'EUR', RO: 'EUR', BG: 'EUR', GR: 'EUR', UA: 'EUR', BY: 'EUR', LT: 'EUR', LV: 'EUR', EE: 'EUR', SI: 'EUR', HR: 'EUR', RS: 'EUR', BA: 'EUR', ME: 'EUR', AL: 'EUR', XK: 'EUR', MK: 'EUR', MD: 'EUR', MT: 'EUR', GE: 'EUR', AM: 'EUR', AZ: 'EUR', CY: 'EUR',
   AU: 'Oceania', NZ: 'Oceania', PG: 'Oceania', FJ: 'Oceania', WS: 'Oceania', TO: 'Oceania', VU: 'Oceania', SB: 'Oceania', FM: 'Oceania', PW: 'Oceania', MH: 'Oceania', KI: 'Oceania', NR: 'Oceania', TV: 'Oceania', GU: 'Oceania', NC: 'Oceania', PF: 'Oceania',
 };
+
+// Short Latin region codes are high-risk tokens. Matching them case-insensitively makes
+// ordinary words such as Spanish/French "de" look like Germany, "Trójmiasto" look like
+// Turkey (TR), and a trademark symbol near text look like Turkmenistan (TM). V5.2 only
+// accepts these codes when the original group name contains the code in uppercase and it
+// is not embedded in another Latin-script word. CJK/Hangul immediately after the code is
+// allowed, preserving valid forms such as "HK朋友交換群組".
+const STRICT_UPPERCASE_REGION_CODES = new Set([
+  ...Object.keys(COUNTRY_CODE_TO_REGION),
+  'USA', 'DPRK', 'KSA', 'UAE',
+]);
 
 function regionFromCountryCode(countryCode) {
   const cc = clean(countryCode).toUpperCase();
@@ -523,14 +535,14 @@ const DEFAULT_ABOUT_LOCATION_CITY_KEYWORDS = {
   CN: ['beijing', '北京', 'shanghai', '上海', 'guangzhou', '广州', 'shenzhen', '深圳', 'chengdu', '成都', 'wuhan', '武汉', 'hangzhou', '杭州', 'nanjing', '南京', 'chongqing', '重庆'],
   HK: ['hong kong', '香港'],
   MO: ['macau', 'macao', '澳门', '澳門'],
-  TW: ['taipei', '台北', '臺北', 'kaohsiung', '高雄', 'taichung', '台中', '臺中'],
+  TW: ['taipei', '台北', '臺北', 'kaohsiung', '高雄', 'taichung', '台中', '臺中', 'tainan', '台南', '臺南', 'hsinchu', '新竹', 'taoyuan', '桃園', '桃园', 'keelung', '基隆', 'chiayi', '嘉義', '嘉义'],
   JP: ['tokyo', '東京', 'osaka', '大阪', 'yokohama', '横滨', '橫濱', 'nagoya', '名古屋', 'sapporo', '札幌', 'fukuoka', '福岡'],
   KR: ['seoul', '서울', 'busan', '부산', 'incheon', '인천', 'daegu', '대구'],
   MN: ['ulaanbaatar', 'ulan bator', 'улаанбаатар'],
 
   TH: ['bangkok', 'กรุงเทพ', 'chiang mai', 'เชียงใหม่', 'pattaya', 'พัทยา', 'phuket', 'ภูเก็ต'],
   VN: ['hanoi', 'ha noi', 'ฮานอย', 'ho chi minh city', 'ho chi minh', 'saigon', 'sai gon', 'da nang', 'đà nẵng', 'haiphong', 'hai phong'],
-  PH: ['manila', 'quezon city', 'cebu city', 'davao city'],
+  PH: ['manila', 'quezon city', 'cebu city', 'davao city', 'pampanga'],
   ID: ['jakarta', 'surabaya', 'bandung', 'medan', 'makassar', 'yogyakarta'],
   MY: ['kuala lumpur', 'johor bahru', 'george town', 'penang', 'kuching', 'kota kinabalu'],
   SG: ['singapore'],
@@ -543,8 +555,8 @@ const DEFAULT_ABOUT_LOCATION_CITY_KEYWORDS = {
   'Middle East': ['riyadh', 'jeddah', 'dubai', 'abu dhabi', 'doha', 'kuwait city', 'manama', 'muscat', 'sanaa', "sana'a", 'baghdad', 'tehran', 'isfahan', 'tel aviv', 'jerusalem', 'amman', 'beirut', 'damascus', 'gaza', 'cairo'],
   'Central Asia': ['astana', 'almaty', 'bishkek', 'dushanbe', 'ashgabat', 'tashkent'],
   'South Asia': ['new delhi', 'mumbai', 'bangalore', 'bengaluru', 'kolkata', 'chennai', 'hyderabad', 'karachi', 'lahore', 'islamabad', 'dhaka', 'chittagong', 'colombo', 'kathmandu', 'thimphu'],
-  'North America': ['new york', 'los angeles', 'chicago', 'houston', 'toronto', 'vancouver', 'montreal', 'calgary', 'ottawa'],
-  LATAM: ['mexico city', 'guadalajara', 'monterrey', 'buenos aires', 'santiago', 'bogota', 'bogotá', 'lima', 'montevideo', 'asuncion', 'asunción', 'la paz', 'quito', 'caracas', 'san juan puerto rico'],
+  'North America': ['new york', 'los angeles', 'chicago', 'houston', 'toronto', 'vancouver', 'montreal', 'calgary', 'ottawa', 'quebec', 'québec', 'quebec city', 'québec city', 'socal', 'southern california'],
+  LATAM: ['mexico city', 'cdmx', 'ciudad de mexico', 'ciudad de méxico', 'guadalajara', 'monterrey', 'buenos aires', 'santiago', 'bogota', 'bogotá', 'lima', 'montevideo', 'asuncion', 'asunción', 'la paz', 'quito', 'caracas', 'san juan puerto rico'],
   BR: ['sao paulo', 'são paulo', 'rio de janeiro', 'brasilia', 'brasília', 'belo horizonte', 'curitiba', 'recife', 'fortaleza'],
   Africa: ['lagos', 'abuja', 'nairobi', 'accra', 'addis ababa', 'dar es salaam', 'kampala', 'kigali', 'mogadishu', 'khartoum', 'tripoli', 'algiers', 'casablanca', 'rabat', 'tunis', 'dakar', 'bamako', 'ouagadougou', 'niamey', "n'djamena", 'yaounde', 'douala', 'kinshasa', 'luanda', 'lusaka', 'harare', 'maputo', 'lilongwe', 'gaborone', 'windhoek', 'maseru', 'mbabane', 'antananarivo', 'cape town', 'johannesburg', 'pretoria'],
   TR: ['istanbul', 'ankara', 'izmir', 'antalya', 'bursa'],
@@ -552,7 +564,7 @@ const DEFAULT_ABOUT_LOCATION_CITY_KEYWORDS = {
   DE: ['berlin', 'munich', 'münchen', 'hamburg', 'frankfurt', 'cologne', 'köln', 'dusseldorf', 'düsseldorf', 'stuttgart'],
   FR: ['paris', 'marseille', 'lyon', 'toulouse', 'lille', 'bordeaux', 'nice'],
   IT: ['rome', 'roma', 'milan', 'milano', 'naples', 'napoli', 'turin', 'torino'],
-  PL: ['warsaw', 'warszawa', 'krakow', 'kraków', 'wroclaw', 'wrocław', 'gdansk', 'gdańsk'],
+  PL: ['warsaw', 'warszawa', 'krakow', 'kraków', 'wroclaw', 'wrocław', 'gdansk', 'gdańsk', 'trójmiasto', 'trojmiasto'],
   RU: ['moscow', 'москва', 'saint petersburg', 'st petersburg', 'санкт петербург'],
   EUR: ['london', 'madrid', 'barcelona', 'lisbon', 'porto', 'stockholm', 'oslo', 'helsinki', 'copenhagen', 'dublin', 'brussels', 'zurich', 'vienna', 'prague', 'budapest', 'bucharest', 'sofia', 'athens', 'kyiv', 'minsk', 'vilnius', 'riga', 'tallinn', 'ljubljana', 'zagreb', 'belgrade', 'sarajevo', 'podgorica', 'tirana', 'skopje', 'chisinau', 'chișinău', 'valletta', 'tbilisi', 'yerevan', 'baku', 'nicosia'],
   Oceania: ['sydney', 'melbourne', 'brisbane', 'perth', 'adelaide', 'auckland', 'wellington', 'port moresby', 'suva', 'apia', "nuku'alofa", 'port vila', 'honiara', 'koror', 'majuro', 'tarawa'],
@@ -869,7 +881,11 @@ function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussi
 function defaultLanguageToRegion(languageSignal) {
   return DEFAULT_LANGUAGE_TO_REGION[languageSignal] || '';
 }
-function phraseMatchesText(keyword, compactText, normText) {
+function escapeRegExp(s) {
+  return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function phraseMatchesText(keyword, compactText, normText, fullText = '') {
   const cleanKeyword = clean(keyword);
   if (!cleanKeyword) return false;
   const compactKeyword = normalizeCompact(cleanKeyword);
@@ -877,10 +893,28 @@ function phraseMatchesText(keyword, compactText, normText) {
   if (!compactKeyword && !normKeyword) return false;
   const isPunctuatedShortCode = /[^\p{Letter}\p{Number}\s]/u.test(cleanKeyword) && compactKeyword.length <= 3;
 
+  // Strict code branch: case-sensitive uppercase only, with Latin-script boundaries.
+  // This blocks lower-case prepositions (de), prefixes inside Latin words (Tr...), and
+  // accidental symbol interpretations, while still allowing uppercase codes next to CJK.
+  if (/^[A-Za-z]{2,3}$/.test(cleanKeyword) && STRICT_UPPERCASE_REGION_CODES.has(cleanKeyword.toUpperCase()) && fullText) {
+    const code = cleanKeyword.toUpperCase();
+    const shortCodePattern = new RegExp(
+      `(^|[^\\p{Script=Latin}\\p{Number}])${escapeRegExp(code)}(?=$|[^\\p{Script=Latin}\\p{Number}])`,
+      'u',
+    );
+    const codeSafeText = String(fullText).replace(/[™®©℠]/g, ' ').normalize('NFKC');
+    return shortCodePattern.test(codeSafeText);
+  }
+
   if (normKeyword && normKeyword.includes(' ')) {
     if (normText.includes(` ${normKeyword} `)) return true;
     if (!isPunctuatedShortCode && compactKeyword && compactText.includes(compactKeyword)) return true;
     return false;
+  }
+
+  const hasAsciiAlphaNum = /[A-Za-z0-9]/.test(cleanKeyword);
+  if (!hasAsciiAlphaNum && compactKeyword && compactText.includes(compactKeyword)) {
+    return true;
   }
 
   if (compactKeyword && compactKeyword.length >= 3 && compactText.includes(compactKeyword)) {
@@ -910,7 +944,7 @@ function detectRegionByKeywordMap(groupName, regionKeywords, source) {
     const list = Array.isArray(keywords) ? keywords : [];
     for (const keyword of list) {
       if (!clean(keyword)) continue;
-      if (!phraseMatchesText(keyword, compactText, normText)) continue;
+      if (!phraseMatchesText(keyword, compactText, normText, fullText)) continue;
       hits.push({ region: mappedRegion, keyword: clean(keyword) });
       break;
     }
@@ -948,7 +982,7 @@ function phraseMatchesLocationCity(keyword, compactText, normText) {
   return false;
 }
 
-function detectRegionByLocationCityMap(locationText, cityRegionKeywords) {
+function detectRegionByLocationCityMap(locationText, cityRegionKeywords, source = 'about_location_city_keyword') {
   if (!cityRegionKeywords || typeof cityRegionKeywords !== 'object') {
     return { region: '', source: '', keyword_hits: [] };
   }
@@ -969,25 +1003,89 @@ function detectRegionByLocationCityMap(locationText, cityRegionKeywords) {
   }
 
   const matchedRegions = unique(hits.map((x) => x.region).filter(Boolean));
-  if (matchedRegions.length === 1) return { region: matchedRegions[0], source: 'about_location_city_keyword', keyword_hits: hits };
+  if (matchedRegions.length === 1) return { region: matchedRegions[0], source, keyword_hits: hits };
   if (matchedRegions.length > 1) {
     const sameBusinessRegion = resolveSameBusinessRegionConflict(matchedRegions);
-    if (sameBusinessRegion) return { region: sameBusinessRegion, source: 'about_location_city_keyword_same_business_region', keyword_hits: hits };
-    return { region: '', source: 'about_location_keyword_conflict', keyword_hits: hits };
+    if (sameBusinessRegion) return { region: sameBusinessRegion, source: `${source}_same_business_region`, keyword_hits: hits };
+    return {
+      region: '',
+      source: source.startsWith('about_location_') ? 'about_location_keyword_conflict' : 'keyword_conflict',
+      keyword_hits: hits,
+    };
   }
   return { region: '', source: '', keyword_hits: [] };
 }
 
-function detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords) {
-  // First identify explicit countries/territories; then normalize to the required region output.
-  // Direct broad-region labels are only used when no country/territory was found.
+function countryCodeFromFlagEmoji(flag) {
+  const chars = Array.from(String(flag || ''));
+  if (chars.length !== 2) return '';
+  const points = chars.map((ch) => ch.codePointAt(0));
+  if (points.some((cp) => cp < 0x1F1E6 || cp > 0x1F1FF)) return '';
+  return String.fromCharCode(points[0] - 0x1F1E6 + 65, points[1] - 0x1F1E6 + 65);
+}
+
+function detectRegionByFlagEmoji(text, source = 'country_flag') {
+  const flags = String(text || '').match(/[\u{1F1E6}-\u{1F1FF}]{2}/gu) || [];
+  const hits = [];
+  for (const flag of flags) {
+    const countryCode = countryCodeFromFlagEmoji(flag);
+    const region = regionFromCountryCode(countryCode);
+    if (!countryCode || !region) continue;
+    hits.push({ region, keyword: `${flag}(${countryCode})` });
+  }
+  const matchedRegions = unique(hits.map((x) => x.region).filter(Boolean));
+  if (matchedRegions.length === 1) return { region: matchedRegions[0], source, keyword_hits: hits };
+  if (matchedRegions.length > 1) {
+    const sameBusinessRegion = resolveSameBusinessRegionConflict(matchedRegions);
+    if (sameBusinessRegion) return { region: sameBusinessRegion, source: `${source}_same_business_region`, keyword_hits: hits };
+    return { region: '', source: 'keyword_conflict', keyword_hits: hits };
+  }
+  return { region: '', source: '', keyword_hits: [] };
+}
+
+function combineExplicitRegionEvidence(matches, combinedSource = 'country_keyword_and_flag') {
+  const valid = (matches || []).filter((m) => m && (m.source || m.region || (m.keyword_hits || []).length));
+  if (!valid.length) return { region: '', source: '', keyword_hits: [] };
+  const hits = valid.flatMap((m) => Array.isArray(m.keyword_hits) ? m.keyword_hits : []);
+  const regions = unique(valid.flatMap((m) => {
+    const explicit = normalizeRegionOutput(m.region);
+    if (explicit) return [explicit];
+    return (Array.isArray(m.keyword_hits) ? m.keyword_hits : []).map((hit) => normalizeRegionOutput(hit.region)).filter(Boolean);
+  }));
+  if (regions.length === 1) {
+    const nonEmpty = valid.filter((m) => m.region);
+    const source = nonEmpty.length === 1 ? nonEmpty[0].source : combinedSource;
+    return { region: regions[0], source, keyword_hits: hits };
+  }
+  if (regions.length > 1) {
+    const sameBusinessRegion = resolveSameBusinessRegionConflict(regions);
+    if (sameBusinessRegion) return { region: sameBusinessRegion, source: `${combinedSource}_same_business_region`, keyword_hits: hits };
+    return { region: '', source: 'keyword_conflict', keyword_hits: hits };
+  }
+  if (valid.some((m) => m.source === 'keyword_conflict')) return { region: '', source: 'keyword_conflict', keyword_hits: hits };
+  return { region: '', source: '', keyword_hits: hits };
+}
+
+function detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords, cityRegionKeywords) {
+  // First identify explicit countries/territories and ISO flag emoji; then normalize to
+  // the required region output. Direct broad-region labels are only used when no explicit
+  // country/territory evidence was found.
   const countryMatch = detectRegionByKeywordMap(groupName, countryRegionKeywords, 'country_keyword');
-  if (countryMatch.source && countryMatch.source !== 'keyword_conflict' && countryMatch.region) return countryMatch;
-  if (countryMatch.source === 'keyword_conflict') return countryMatch;
+  const flagMatch = detectRegionByFlagEmoji(groupName, 'country_flag');
+  const explicitMatch = combineExplicitRegionEvidence([countryMatch, flagMatch]);
+  if (explicitMatch.source && explicitMatch.source !== 'keyword_conflict' && explicitMatch.region) return explicitMatch;
+  if (explicitMatch.source === 'keyword_conflict') return explicitMatch;
 
   const directRegionMatch = detectRegionByKeywordMap(groupName, directRegionKeywords, 'region_keyword');
   if (directRegionMatch.source && directRegionMatch.source !== 'keyword_conflict' && directRegionMatch.region) return directRegionMatch;
   if (directRegionMatch.source === 'keyword_conflict') return directRegionMatch;
+
+  // High-confidence city/province aliases are also valid in group names. This sits below
+  // explicit country/region names but above GeoNames, and catches compact CJK forms such as
+  // 台中社團 / 台南限定 without sending a long non-location phrase to the external service.
+  const cityMatch = detectRegionByLocationCityMap(groupName, cityRegionKeywords, 'group_name_city_keyword');
+  if (cityMatch.source && cityMatch.source !== 'keyword_conflict' && cityMatch.region) return cityMatch;
+  if (cityMatch.source === 'keyword_conflict') return cityMatch;
 
   return { region: '', source: '', keyword_hits: [] };
 }
@@ -1013,10 +1111,12 @@ function detectRegionByAboutLocation(locationText, countryRegionKeywords, direct
   if (!location) return { region: '', source: '', keyword_hits: [] };
 
   const countryMatch = detectRegionByKeywordMap(location, countryRegionKeywords, 'about_location_country_keyword');
-  if (countryMatch.source && countryMatch.source !== 'keyword_conflict' && countryMatch.region) return countryMatch;
-  if (countryMatch.source === 'keyword_conflict') return { ...countryMatch, source: 'about_location_keyword_conflict' };
+  const flagMatch = detectRegionByFlagEmoji(location, 'about_location_country_flag');
+  const explicitMatch = combineExplicitRegionEvidence([countryMatch, flagMatch], 'about_location_country_keyword_and_flag');
+  if (explicitMatch.source && explicitMatch.source !== 'keyword_conflict' && explicitMatch.region) return explicitMatch;
+  if (explicitMatch.source === 'keyword_conflict') return { ...explicitMatch, source: 'about_location_keyword_conflict' };
 
-  const cityMatch = detectRegionByLocationCityMap(location, cityRegionKeywords);
+  const cityMatch = detectRegionByLocationCityMap(location, cityRegionKeywords, 'about_location_city_keyword');
   if (cityMatch.source && cityMatch.source !== 'about_location_keyword_conflict' && cityMatch.region) return cityMatch;
   if (cityMatch.source === 'about_location_keyword_conflict') return cityMatch;
 
@@ -1058,16 +1158,42 @@ function mergeExternalGeocoderConfig(config, configFile, outDir) {
     baseDir,
   );
   const local = readJsonIfExists(localConfigFile);
-  const localExternal = local && local.external_geocoder && typeof local.external_geocoder === 'object'
+  const localRoot = local && typeof local === 'object' && !Array.isArray(local)
+    ? Object.fromEntries(Object.entries(local).filter(([key]) => key !== 'external_geocoder'))
+    : {};
+  const localNested = local && local.external_geocoder && typeof local.external_geocoder === 'object'
     ? local.external_geocoder
-    : (local && typeof local === 'object' ? local : {});
-  const merged = { ...external, ...localExternal };
+    : {};
+  const localExternal = { ...localRoot, ...localNested };
+
+  // Local config supplies machine-specific credentials/defaults; an explicit task config
+  // remains the highest-priority override. This also keeps `enabled:false` usable when a
+  // one-off run must deliberately suppress external requests.
+  const merged = { ...localExternal, ...external };
   if (!merged.provider) merged.provider = 'geonames';
   if (!merged.endpoint) merged.endpoint = 'http://api.geonames.org/searchJSON';
-  if (merged.enabled === undefined) merged.enabled = false;
+  if (!merged.username_env) merged.username_env = 'GEONAMES_USERNAME';
   if (!merged.username && merged.username_env) merged.username = process.env[clean(merged.username_env)] || '';
   if (!merged.username && process.env.GEONAMES_USERNAME) merged.username = process.env.GEONAMES_USERNAME;
-  merged.enabled = boolLike(merged.enabled, false);
+
+  const taskHasEnabled = Object.prototype.hasOwnProperty.call(external, 'enabled');
+  const localHasEnabled = Object.prototype.hasOwnProperty.call(localExternal, 'enabled');
+  if (taskHasEnabled) {
+    merged.enabled = boolLike(external.enabled, false);
+    merged.enable_source = 'task_config_explicit';
+  } else if (localHasEnabled) {
+    merged.enabled = boolLike(localExternal.enabled, false);
+    merged.enable_source = 'local_config_explicit';
+  } else if (clean(merged.username)) {
+    // V5.1: a valid local username/environment variable is sufficient to enable GeoNames
+    // when a temporary task_config omitted the entire external_geocoder block.
+    merged.enabled = true;
+    merged.enable_source = 'auto_credentials';
+  } else {
+    merged.enabled = false;
+    merged.enable_source = 'disabled_no_credentials';
+  }
+
   merged.only_when_region_empty = boolLike(merged.only_when_region_empty, true);
   merged.sources = Array.isArray(merged.sources) && merged.sources.length ? merged.sources.map((x) => clean(x)).filter(Boolean) : ['group_name', 'about_location'];
   merged.max_queries_per_group = Math.max(1, Math.min(8, Number(merged.max_queries_per_group || 4)));
@@ -1111,28 +1237,122 @@ function normalizeGeocoderQuery(s) {
     .normalize('NFKC')
     .toLowerCase()
     .replace(/[\u{1F300}-\u{1FAFF}]/gu, ' ')
+    .replace(/\p{Symbol}+/gu, ' ')
+    .replace(/[™®©℠]/g, ' ')
     .replace(/https?:\/\/\S+/gi, ' ')
     .replace(/[“”"'`]+/g, ' ')
+    .replace(/[︎️�]/g, ' ')
+    .replace(/\p{Punctuation}+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
+const GEOCODER_GROUP_NAME_STOPWORDS = new Set([
+  // English / generic community terms.
+  'official','officials','fan','fans','group','groups','community','communities','server','servers','global','international','world','worldwide','mundial',
+  'trade','trades','trading','buy','buying','sell','selling','sale','market','marketplace','exchange','giveaway','gift','gifts','account','accounts','service','services',
+  'help','tips','guide','guild','clan','team','players','player','people','friends','friend','friendship','trainer','trainers','codes','code','page','pages','news','information','info',
+  'game','games','gaming','mobile','online','roblox','facebook','fb','go','new','old','main','backup','real','all','only','and','the','in','of','a','an','america','asia',
+  'event','events','chat','discussion','discussions','remote','raid','raids','raiding','invite','invites','daily','level','trusted','store','stores','hosting','fest','promo','promos','unlimited',
+  'add','here','come','together','goers','area','arena','bay','network','club','clubs','admin','admins','season','wide','free','rare','home','regional','only','more','ladies',
+  'state','province','county','city','region','surroundings','alrededores','alentours','solo','intercambios','et','triangle',
+  'spam','spam-free','family','friendly','communitytcg',
+  'san','santa','santo','saint','st','fort','new','north','south','east','west','puerto','beach',
+  'fly','shiny','variocolor','coordinate','coordinates','low','cost','raffle','raffles','unite','latinos','latino','spoof','spoofing','spoofer','scatterbug','mewtwo','mega','pikachu','pocket','pokeverse','tcgp','gps','pgsharp','postcard','postcards','collector','collectors','collection','collections','card','cards','crochet','knit','coins','coin','redux','zone','sv',
+
+  // Spanish.
+  'grupo','grupos','de','del','la','las','los','para','por','con','y','amigo','amigos','intercambio','intercambios',
+  'cambio','cambios','compra','compras','venta','ventas','cuenta','cuentas','codigo','codigos','entrenador','entrenadores','oficial',
+  'coordenadas','rifas','monedas','bajo','costo','mas','internacional','ayuda','ayudas','regalo','regalos','directo','directos','informacion','información','incursion','incursiones','remota','remotas','invitacion','invitación','mundial','mundiales','espanol','español','en','sureste',
+
+  // Portuguese.
+  'do','da','dos','das','e','amizade','amizades','troca','trocas','venda','vendas','conta','contas','jogadores','comunidade','ajuda','ajudas',
+
+  // French.
+  'du','des','le','les','groupe','groupes','officiel','officielle','ami','amis','joueurs','communaute','echange','echanges','échange','échanges',
+
+  // Common fragments produced by punctuation or stylized Pokémon spellings.
+  'pokemon','pokémon','pokemongo','pogo','pkmgo','pok','emon','tcg','edas',
+
+  // Korean/Japanese/Chinese generic group-language tokens. Known city names are handled
+  // by the high-confidence city map before GeoNames; these words should not become place
+  // queries merely because the group name is a sentence.
+  '포켓몬고','하는사람','사람','모여','모임','그룹','커뮤니티','친구','교환','레이드','초대','코드','및','소통',
+  'ポケモンgo','ポケモン','グループ','コミュニティ','交換','レイド','招待','コード',
+  '社群','社區','社区','玩家群','交流群','討論','讨论','交換群','交换群','交友','交易','買賣','买卖','帳號','账号','帳號買賣','账号买卖','帳號交易','账号交易','代練','代练','代打','代儲','代储','代刷','異色','异色','異色分享','异色分享','色違分享','问题讨论','問題討論','發問','发问','交流','交流區','交流区','資訊分享','资讯分享','歡迎加入','欢迎加入','飛人','飞人','飛人群','飞人群','刷機','刷机','刷王','星塵','星尘','沙子','好友','活動','活动','硬體周邊','硬体周边','手環買賣','手环买卖','抓寶夢','抓宝梦','飛天夢','飞天梦','問題','问题','換怪','换怪','分享','中文交流','自由交流','買賣區','买卖区','交易區','交易区',
+]);
+
+const GEOCODER_GENERIC_QUERY_PHRASES = new Set([
+  'bay area','remote raid','remote raids','raid invites','friend codes','friends codes','trusted store',
+  'come together','world wide','buy sell','compra venta','trocas vendas','add friends','level raid invites',
+]);
+
+// Stopwords in this set may legitimately be part of a place name. Preserve a full segment
+// such as "Las Vegas", "New York", "Fort Worth", or "Washington State" before removing
+// generic words, but do not preserve phrases like "Edinburgh Community" or "Raid Invites".
+const GEOCODER_PLACE_GLUE_WORDS = new Set([
+  'las','los','la','el','de','del','da','do','dos','das','du','des','le','les',
+  'san','santa','santo','saint','st','fort','new','old','north','south','east','west',
+  'puerto','beach','state','province','county','city','region',
+]);
+
+const GEOCODER_CJK_NOISE_FRAGMENTS = [
+  '精靈寶可夢','精灵宝可梦','寶可夢','宝可梦','神奇寶貝','神奇宝贝','口袋妖怪',
+  '討論區','讨论区','交流群','交流區','交流区','交流群組','交流群组','群組','群组','社團','社团',
+  '限定','玩家','粉絲','粉丝','朋友','交換','交换','遊戲','游戏','官方','專屬','专属','專區','专区','買賣專區','买卖专区','資訊','资讯','詢問','询问','第二群組','第二群组',
+];
+
+function containsNonLatinScript(text) {
+  return /[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Arabic}\p{Script=Cyrillic}]/u.test(String(text || ''));
+}
+
+function removeAsciiTranslationParentheses(text) {
+  const raw = String(text || '');
+  const outside = raw.replace(/[（(][^）)]*[）)]/g, ' ');
+  if (!containsNonLatinScript(outside)) return raw;
+  return raw.replace(/[（(]([\x00-\x7F\s]+)[）)]/g, ' ');
+}
+
 function isUnsafeShortLocationToken(q) {
-  const text = clean(q);
-  if (!text) return true;
-  const norm = normalizeGeocoderQuery(text);
-  if (norm.length < 3) return true;
+  const norm = normalizeGeocoderQuery(q);
+  if (!norm) return true;
+  if (norm.length < 2) return true;
+  if (norm.length < 3 && /^[A-Za-z0-9]+$/.test(norm)) return true;
   if (/^[a-z]{2}$/i.test(norm)) return true;
   if (/^\d+$/.test(norm)) return true;
   return false;
 }
 
-const GEOCODER_GROUP_NAME_STOPWORDS = new Set([
-  'official','fan','fans','group','groups','community','server','servers','global','international','world','worldwide',
-  'trade','trading','buy','sell','sale','market','marketplace','help','tips','guide','guild','clan','team','players','player',
-  'game','games','gaming','mobile','online','roblox','facebook','fb','new','old','v1','v2','v3','officials','admin','admins',
-  'exchange','giveaway','code','codes','event','events','chat','discussion','only','all','real','main','backup'
-]);
+function geocoderQuerySafety(q, source = 'group_name') {
+  const norm = normalizeGeocoderQuery(q);
+  if (isUnsafeShortLocationToken(norm)) return { unsafe: true, reason: 'too_short_or_code' };
+  if (source !== 'group_name') return { unsafe: false, reason: '' };
+
+  const words = norm.split(/\s+/).filter(Boolean);
+  if (!words.length) return { unsafe: true, reason: 'empty_query' };
+  if (/[\p{Script=Hangul}]/u.test(norm)) {
+    if (words.length >= 3) return { unsafe: true, reason: 'hangul_sentence_not_location' };
+    // Known Korean cities are resolved locally before GeoNames. Other Hangul fragments
+    // must carry an administrative suffix to qualify as a location candidate.
+    if (!/[시도군구]$/u.test(norm)) return { unsafe: true, reason: 'hangul_fragment_not_location' };
+  }
+  if (/[\p{Script=Han}]/u.test(norm)) {
+    // Known compact Chinese city names (台中/台南/新竹/...) are resolved locally. Only
+    // residual names with an administrative suffix are safe enough for external lookup;
+    // mixed game/trade fragments such as IV100分享 are never location candidates.
+    if (!/[市縣县州省區区鄉乡鎮镇旗盟島岛]$/u.test(norm)) {
+      return { unsafe: true, reason: 'han_fragment_not_location' };
+    }
+  }
+  if (GEOCODER_GENERIC_QUERY_PHRASES.has(norm)) return { unsafe: true, reason: 'generic_phrase' };
+  if (words.every((w) => GEOCODER_GROUP_NAME_STOPWORDS.has(w))) return { unsafe: true, reason: 'generic_group_terms_only' };
+  if (words.length === 1) {
+    const w = words[0];
+    if (GEOCODER_GROUP_NAME_STOPWORDS.has(w)) return { unsafe: true, reason: 'generic_single_word' };
+    if (/^[a-z]{1,3}$/i.test(w)) return { unsafe: true, reason: 'short_ascii_single_word' };
+  }
+  return { unsafe: false, reason: '' };
+}
 
 function removeKnownTitleWords(words, titles) {
   const remove = new Set();
@@ -1140,39 +1360,104 @@ function removeKnownTitleWords(words, titles) {
     for (const w of normalizeWords(title).split(/\s+/).filter(Boolean)) {
       if (w.length >= 2) remove.add(w);
     }
+    const compactTitle = normalizeCompact(title);
+    if (compactTitle.length >= 4) remove.add(compactTitle);
   }
-  return words.filter((w) => !remove.has(w));
+  return words.filter((w) => {
+    if (remove.has(w)) return false;
+    // Long title words sometimes remain fused with another token after punctuation or a
+    // stylized group name (for example "PokeMonedas"). Treat these as title noise.
+    for (const titleWord of remove) {
+      if (titleWord.length >= 6 && w.startsWith(titleWord)) return false;
+    }
+    return true;
+  });
+}
+
+function stripCjkGroupNoise(text) {
+  let out = String(text || '');
+  for (const fragment of GEOCODER_CJK_NOISE_FRAGMENTS) out = out.split(fragment).join(' ');
+  return clean(out);
+}
+
+function titleOnlyGeocoderWords(text, titles) {
+  let words = normalizeGeocoderQuery(text)
+    .replace(/(?<![\p{Script=Latin}\p{Number}])(?:pokémon|pokemon|pokemongo|pogo|pkmgo|go)(?![\p{Script=Latin}\p{Number}])/giu, ' ')
+    .replace(/\b(?:pokemon|pokemongo|pogo|pkmgo|go)[-–—]+/gi, ' ')
+    .replace(/[-–—]+(?:pokemon|pokemongo|pogo|pkmgo|go)\b/gi, ' ')
+    .replace(/[|/\\•·:;()[\]{}<>,!?+&，。！？、「」『』【】《》〈〉]+/g, ' ')
+    .replace(/\b(v\d+|s\d+|season\s*\d+)\b/gi, ' ')
+    .split(/\s+/)
+    .map((w) => w.replace(/^[-–—]+|[-–—]+$/g, ''))
+    .filter((w) => Boolean(w) && /[\p{Letter}\p{Number}]/u.test(w));
+  words = removeKnownTitleWords(words, titles)
+    .filter((w) => !/^\d+$/.test(w));
+  words = words.filter((w, i) => i === 0 || w !== words[i - 1]);
+  return words;
+}
+
+function cleanGeocoderWords(text, titles) {
+  return titleOnlyGeocoderWords(text, titles)
+    .filter((w) => !GEOCODER_GROUP_NAME_STOPWORDS.has(w));
+}
+
+function pushSafeGeocoderCandidate(candidates, value, source = 'group_name') {
+  const normalized = clean(normalizeGeocoderQuery(value));
+  if (!normalized || normalized.length > 100) return;
+  const safety = geocoderQuerySafety(normalized, source);
+  if (safety.unsafe) return;
+  candidates.push(normalized);
 }
 
 function extractGeocoderQueriesFromGroupName(groupName, gameName, allGameNames, maxQueries) {
-  const text = clean(groupName || '');
-  if (!text) return [];
+  const original = clean(groupName || '');
+  if (!original) return [];
   const titles = unique([gameName].concat(allGameNames || [])).filter(Boolean);
-  let normalized = normalizeGeocoderQuery(text)
-    .replace(/[|/\\•·:;()[\]{}<>]+/g, ' ')
-    .replace(/\b(v\d+|s\d+|season\s*\d+)\b/gi, ' ');
-  let words = normalized.split(/\s+/).filter(Boolean);
-  words = removeKnownTitleWords(words, titles)
-    .filter((w) => !GEOCODER_GROUP_NAME_STOPWORDS.has(w))
-    .filter((w) => !/^\d+$/.test(w));
+  const withoutTranslation = removeAsciiTranslationParentheses(original)
+    .replace(/[™®©℠]/g, ' ');
 
   const candidates = [];
-  const cleanedRemainder = clean(words.join(' '));
-  if (cleanedRemainder) candidates.push(cleanedRemainder);
 
-  // Try compact 1-4 word windows from the remaining non-game text. This catches city/state
-  // fragments such as "ho chi minh" even when the group name also contains trading words.
-  for (let size = Math.min(4, words.length); size >= 1; size--) {
-    for (let i = 0; i + size <= words.length; i++) {
-      candidates.push(words.slice(i, i + size).join(' '));
+  // Strong punctuation usually separates independent place candidates. Try these segments
+  // before generic sliding windows, so "Las Vegas/Hendo/BC" resolves Las Vegas instead of
+  // a later small place named Hendo.
+  const rawSegments = withoutTranslation.split(/[|/\\•·:;()[\]{}<>，。！？、「」『』【】《》〈〉&]+/g);
+  for (const segment of rawSegments) {
+    const cjkCleaned = stripCjkGroupNoise(segment);
+    const titleOnlyWords = titleOnlyGeocoderWords(cjkCleaned, titles);
+    const segmentStopwords = titleOnlyWords.filter((w) => GEOCODER_GROUP_NAME_STOPWORDS.has(w));
+    const segmentHasPlaceWord = titleOnlyWords.some((w) => !GEOCODER_GROUP_NAME_STOPWORDS.has(w));
+    const onlyPlaceGlueStopwords = segmentStopwords.every((w) => GEOCODER_PLACE_GLUE_WORDS.has(w));
+    if (titleOnlyWords.length >= 2 && titleOnlyWords.length <= 6 && segmentHasPlaceWord && onlyPlaceGlueStopwords) {
+      pushSafeGeocoderCandidate(candidates, titleOnlyWords.join(' '));
+    }
+    const words = cleanGeocoderWords(cjkCleaned, titles);
+    if (words.length) pushSafeGeocoderCandidate(candidates, words.join(' '));
+
+    // CJK group names do not have spaces. After removing game/community noise, the remaining
+    // compact fragment is often the city/province itself (台中, 台南, 新竹, ...).
+    const cjkResidual = stripCjkGroupNoise(segment)
+      .replace(/[A-Za-z0-9\s_-]+/g, ' ')
+      .replace(/[^\p{Script=Han}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    for (const chunk of cjkResidual.split(/\s+/).filter((x) => x.length >= 2 && x.length <= 8)) {
+      pushSafeGeocoderCandidate(candidates, chunk);
     }
   }
 
-  return unique(candidates)
-    .map((x) => clean(x))
-    .filter((x) => !isUnsafeShortLocationToken(x))
-    .filter((x) => x.length <= 80)
-    .slice(0, Math.max(1, maxQueries || 4));
+  const allWords = cleanGeocoderWords(stripCjkGroupNoise(withoutTranslation), titles);
+  if (allWords.length) pushSafeGeocoderCandidate(candidates, allWords.join(' '));
+
+  // Prefer meaningful multiword windows before single tokens.
+  for (let size = Math.min(4, allWords.length); size >= 2; size--) {
+    for (let i = 0; i + size <= allWords.length; i++) {
+      pushSafeGeocoderCandidate(candidates, allWords.slice(i, i + size).join(' '));
+    }
+  }
+  for (const word of allWords) pushSafeGeocoderCandidate(candidates, word);
+
+  return unique(candidates).slice(0, Math.max(1, maxQueries || 4));
 }
 
 function extractGeocoderQueriesFromAboutLocation(aboutLocationText, maxQueries) {
@@ -1187,7 +1472,7 @@ function extractGeocoderQueriesFromAboutLocation(aboutLocationText, maxQueries) 
     .map((x) => clean(x))
     .filter(Boolean));
   return parts
-    .filter((x) => !isUnsafeShortLocationToken(x))
+    .filter((x) => !geocoderQuerySafety(x, 'about_location').unsafe)
     .filter((x) => x.length <= 100)
     .slice(0, Math.max(1, maxQueries || 4));
 }
@@ -1442,9 +1727,15 @@ async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
   const username = clean(externalGeocoder.username || '');
   if (!username) return { status: 'missing_username', source, query };
   const normalizedQuery = normalizeGeocoderQuery(query);
-  if (isUnsafeShortLocationToken(normalizedQuery)) return { status: 'unsafe_query', source, query: normalizedQuery };
+  const safety = geocoderQuerySafety(normalizedQuery, source);
+  if (safety.unsafe) {
+    if (stats) stats.external_geocoder_filtered_queries = (stats.external_geocoder_filtered_queries || 0) + 1;
+    return { status: 'unsafe_query', source, query: normalizedQuery, reason: safety.reason };
+  }
   const endpointKey = normalizeGeonamesEndpoint(externalGeocoder.endpoint);
-  const cacheKey = `geonames|${endpointKey}|${normalizedQuery}`;
+  // V5.2 cache namespace invalidates earlier accepted false positives and separates the
+  // stricter group-name evaluation from explicit About > Location lookups.
+  const cacheKey = `geonames-v5.2|${endpointKey}|${source}|${normalizedQuery}`;
   const cached = cache ? cache.get(cacheKey) : null;
   if (cached) {
     if (stats) stats.external_geocoder_cache_hits = (stats.external_geocoder_cache_hits || 0) + 1;
@@ -1454,7 +1745,7 @@ async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
   const response = await geonamesRequest(normalizedQuery, username, externalGeocoder.max_rows, externalGeocoder.timeout_ms, externalGeocoder.endpoint);
   const evaluated = evaluateGeonamesResults(normalizedQuery, response, externalGeocoder.min_confidence, externalGeocoder.ambiguity_margin);
   const out = { ...evaluated, provider: 'geonames', source, query: normalizedQuery };
-  if (cache && !['network_error', 'timeout', 'geonames_account_not_enabled', 'geonames_username_error', 'geonames_http_error', 'geonames_endpoint_error', 'parse_error'].includes(out.status)) cache.set(cacheKey, out);
+  if (cache && !['unsafe_query', 'network_error', 'timeout', 'geonames_account_not_enabled', 'geonames_username_error', 'geonames_http_error', 'geonames_endpoint_error', 'parse_error'].includes(out.status)) cache.set(cacheKey, out);
   await sleepMs(externalGeocoder.rate_limit_ms);
   return out;
 }
@@ -1493,6 +1784,7 @@ async function runExternalGeocoderFallback({
   if (!uniqueSpecs.length) return { status: 'no_candidate_query' };
 
   let last = { status: 'no_result' };
+  let bestAmbiguous = null;
   const attemptedQueries = [];
   for (const spec of uniqueSpecs.slice(0, externalGeocoder.max_queries_per_group)) {
     if (stats) stats.external_geocoder_attempted = (stats.external_geocoder_attempted || 0) + 1;
@@ -1504,14 +1796,22 @@ async function runExternalGeocoderFallback({
       return { ...result, attempted_queries: attemptedQueries.join(' | ') };
     }
     if (result.status === 'ambiguous') {
-      if (stats) stats.external_geocoder_ambiguous = (stats.external_geocoder_ambiguous || 0) + 1;
-      return { ...result, attempted_queries: attemptedQueries.join(' | ') };
+      if (!bestAmbiguous || Number(result.confidence || 0) > Number(bestAmbiguous.confidence || 0)) {
+        bestAmbiguous = { ...result, attempted_queries: attemptedQueries.join(' | ') };
+      }
+      // A broad phrase may be ambiguous while a later punctuation-delimited city candidate
+      // is exact. Continue instead of terminating the whole group on the first ambiguity.
+      continue;
     }
     if (['geonames_api_error', 'geonames_account_not_enabled', 'geonames_username_error', 'geonames_http_error', 'geonames_endpoint_error', 'network_error', 'timeout', 'parse_error'].includes(result.status)) {
       if (stats) stats.external_geocoder_errors = (stats.external_geocoder_errors || 0) + 1;
     } else if (result.status === 'no_result' || result.status === 'low_confidence') {
       if (stats) stats.external_geocoder_no_result = (stats.external_geocoder_no_result || 0) + 1;
     }
+  }
+  if (bestAmbiguous) {
+    if (stats) stats.external_geocoder_ambiguous = (stats.external_geocoder_ambiguous || 0) + 1;
+    return { ...bestAmbiguous, attempted_queries: attemptedQueries.join(' | ') };
   }
   return last;
 }
@@ -1548,7 +1848,7 @@ async function resolveRegionV5({
   allGameNames,
 }) {
   const normalizedLocation = clean(aboutLocationText || '');
-  const groupNameMatch = detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords);
+  const groupNameMatch = detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords, aboutLocationCityKeywords);
 
   if (groupNameMatch.source && groupNameMatch.source !== 'keyword_conflict' && groupNameMatch.region) {
     return {
@@ -1677,7 +1977,7 @@ function resolveRegionWithAboutLocationFallback({
   aboutLocationCityKeywords,
   aboutLocationText,
 }) {
-  const groupNameMatch = detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords);
+  const groupNameMatch = detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords, aboutLocationCityKeywords);
   const existingRegion = mapRegion(languageSignal, languageToRegion, groupNameMatch);
   const normalizedLocation = clean(aboutLocationText || '');
 
@@ -2775,6 +3075,7 @@ function resolveCollisions(rows) {
       manual_review_rows: 0,
       output_rows: 0,
       external_geocoder_enabled: externalGeocoder.enabled ? 1 : 0,
+      external_geocoder_enable_source: externalGeocoder.enable_source || '',
       external_geocoder_attempted: 0,
       external_geocoder_requests: 0,
       external_geocoder_cache_hits: 0,
@@ -2782,6 +3083,7 @@ function resolveCollisions(rows) {
       external_geocoder_ambiguous: 0,
       external_geocoder_no_result: 0,
       external_geocoder_errors: 0,
+      external_geocoder_filtered_queries: 0,
       game_breakdown: {},
     };
     const formulaFields = {

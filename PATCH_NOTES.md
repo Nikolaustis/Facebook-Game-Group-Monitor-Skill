@@ -1,3 +1,55 @@
+# V5.2.0 补丁说明：地区代码边界与 GeoNames 假阳性防护
+
+## 修复内容
+
+- 修复 `™` 经 Unicode 兼容归一化后变成 `TM`、进而误判为土库曼斯坦的问题。
+- 修复西班牙语/法语小写介词 `de` 被当作德国代码 `DE` 的问题。
+- 修复 `Trójmiasto` 中 `Tr` 被当作土耳其代码 `TR` 的问题。
+- 新增本地高确定性位置：`Québec -> North America`、`台中/台南/臺南 -> TW`、`Trójmiasto -> PL`、`Danmark -> EUR`、`SoCal -> North America`。
+- 群名城市映射正式加入地区判断链路，位于 GeoNames 前。
+- GeoNames 查询新增多语言泛词、翻译括号、单词安全和短语完整性过滤，阻止 `Come`、`Compra`、`Gift`、`trades`、`Bay`、`Only`、`Daily`、`Store`、`Level` 等非地点词产生假阳性。
+- 对 `San Diego`、`El Paso TX`、`San Antonio`、`Fort Worth`、`Las Vegas` 等连续地点短语优先查询。
+- 遇到首个歧义结果时不立即停止，可继续尝试更明确的候选短语。
+- 缓存 key 升级为 `geonames-v5.2|endpoint|source|query`，自动隔离旧版缓存。
+- 新增统计 `external_geocoder_filtered_queries`。
+
+## 覆盖后建议
+
+虽然 V5.2.0 已通过缓存版本隔离旧结果，仍建议在重新采集前删除旧缓存：
+
+```powershell
+Get-ChildItem .uns -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Force
+```
+
+历史 Excel 不会自动更正；需要重新运行第二轮，或使用基于 V5.2.0 同一规则的补表流程。
+
+---
+
+# V5.1.0 补丁说明：GeoNames 自动启用与地区别名/国旗增强
+
+## 修复 1：临时任务配置遗漏 GeoNames 开关
+
+- 任务配置显式设置 `external_geocoder.enabled` 时，以任务配置为准。
+- 任务配置未设置时，读取 `config/local/geonames.local.json`。
+- 本地配置也未设置 `enabled`，但存在 GeoNames 用户名时，自动启用，来源记为 `auto_credentials`。
+- 没有用户名时保持关闭；显式 `enabled:false` 始终可强制关闭。
+- `audit_stats.json` 新增 `external_geocoder_enable_source`。
+
+## 修复 2：高确定性地区信息未被识别
+
+- `大马`、`大馬`、`马来西亚`、`馬來西亞` -> `MY`。
+- `Belgique`、`Belgien` -> `EUR`。
+- `CZ`、`SK`、`CZ/SK`、`Česko`、`Slovensko` 等 -> `EUR`。
+- 国旗 emoji 自动解码为 ISO 国家代码，并沿用既有国家到业务区域映射。
+- 短代码采用 ASCII 边界识别，因此 `HK朋友交換群組` 可命中 `HK`，但不会在普通英文单词内部误命中。
+- 相互冲突的国旗或地区证据仍按现有跨业务大区冲突规则留空。
+
+## 私有配置
+
+`config/local/geonames.local.json` 已明确写入 `enabled:true`，并继续由 `.gitignore` 忽略。公开仓库只应上传 `config/geonames.local.example.json`。
+
+---
+
 # V5.0.1 补丁说明：GeoNames endpoint 与错误状态修复
 
 ## 修复内容

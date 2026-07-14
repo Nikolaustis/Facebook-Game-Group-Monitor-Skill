@@ -120,7 +120,11 @@
     ],
     "MY": [
       "malaysia",
-      "malay"
+      "malay",
+      "大马",
+      "大馬",
+      "马来西亚",
+      "馬來西亞"
     ],
     "SG": [
       "sg",
@@ -195,7 +199,9 @@
       "u.s.a.",
       "united states",
       "canada",
-      "greenland"
+      "greenland",
+      "quebec",
+      "québec"
     ],
     "LATAM": [
       "mexico",
@@ -269,7 +275,9 @@
       "poland",
       "polska",
       "polish",
-      "polski"
+      "polski",
+      "trójmiasto",
+      "trojmiasto"
     ],
     "RU": [
       "russia",
@@ -292,7 +300,20 @@
       "georgia",
       "armenia",
       "azerbaijan",
-      "cyprus"
+      "cyprus",
+      "belgique",
+      "belgien",
+      "czech",
+      "česko",
+      "cesko",
+      "cz",
+      "slovak",
+      "slovensko",
+      "sk",
+      "cz/sk",
+      "danmark",
+      "sverige",
+      "schweiz"
     ],
     "Oceania": [
       "australia",
@@ -414,7 +435,8 @@
       "manila",
       "quezon city",
       "cebu city",
-      "davao city"
+      "davao city",
+      "pampanga"
     ],
     "ID": [
       "jakarta",
@@ -448,7 +470,20 @@
     ],
     "TW": [
       "taipei",
-      "kaohsiung"
+      "kaohsiung",
+      "tainan",
+      "台南",
+      "臺南",
+      "hsinchu",
+      "新竹",
+      "taoyuan",
+      "桃園",
+      "桃园",
+      "keelung",
+      "基隆",
+      "chiayi",
+      "嘉義",
+      "嘉义"
     ],
     "Middle East": [
       "riyadh",
@@ -469,14 +504,23 @@
       "new york",
       "los angeles",
       "toronto",
-      "vancouver"
+      "vancouver",
+      "quebec",
+      "québec",
+      "quebec city",
+      "québec city",
+      "socal",
+      "southern california"
     ],
     "LATAM": [
       "mexico city",
       "buenos aires",
       "santiago",
       "bogota",
-      "lima"
+      "lima",
+      "cdmx",
+      "ciudad de mexico",
+      "ciudad de méxico"
     ],
     "BR": [
       "sao paulo",
@@ -516,6 +560,10 @@
       "melbourne",
       "auckland",
       "wellington"
+    ],
+    "PL": [
+      "trójmiasto",
+      "trojmiasto"
     ]
   },
   "external_geocoder": {

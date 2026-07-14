@@ -1,4 +1,32 @@
-# FB Game Group Monitor Skill V5.0.1
+# FB Game Group Monitor Skill V5.2.0
+
+## V5.2.0：地区识别精度修复
+
+V5.2.0 重点修复 GeoNames 补全和第二轮地区判断中的假阳性：
+
+- 两到三位国家/地区代码只在原始文本中以**明确大写代码**出现时生效；小写介词 `de` 不再视为德国，`Trójmiasto` 开头的 `Tr` 不再视为土耳其。
+- 在 Unicode 归一化前移除 `™ / ® / © / ℠`，防止 `™` 被兼容分解为 `TM` 并误判为土库曼斯坦。
+- 群组名称新增城市/省州本地匹配阶段，优先于 GeoNames：支持 `Québec`、`台中`、`台南/臺南`、`Trójmiasto`、`SoCal` 等高确定性地点；`Danmark` 直接映射为 `EUR`。
+- GeoNames 候选抽取不再把整条群名或任意剩余单词当作地点。新增多语言泛词过滤、翻译括号移除、地点短语优先和单词安全检查。
+- `Come`、`Compra`、`Gift`、`trades`、`Bay`、`Only`、`Daily`、`Store`、`Level` 等泛词不会再送入 GeoNames。
+- 对 `San Diego`、`El Paso TX`、`San Antonio`、`Fort Worth`、`Las Vegas` 等连续地点短语优先保留完整查询。
+- GeoNames 缓存键升级为 `geonames-v5.2`，旧版假阳性缓存不会被本版本复用；错误和不安全查询仍不写入缓存。
+- `audit_stats.json` 新增 `external_geocoder_filtered_queries`，统计被安全过滤器拦截的候选查询数。
+
+地区判断仍遵循保守原则：已有明确国家/地区、本地城市映射或高可信证据时不调用 GeoNames；GeoNames 低置信、歧义或泛词候选均保持 `region` 为空。
+
+## V5.1.0：GeoNames 自动启用与高确定性地区规则
+
+V5.1.0 解决临时任务配置遗漏 `external_geocoder` 后 GeoNames 静默关闭的问题：
+
+- 当任务配置未显式设置 `external_geocoder.enabled`，但 `config/local/geonames.local.json` 或 `GEONAMES_USERNAME` 已提供有效用户名时，第二轮自动启用 GeoNames。
+- 任务配置显式写入 `enabled: false` 时仍会禁用，便于单次任务主动关闭外部请求。
+- `audit_stats.json` 新增 `external_geocoder_enable_source`，可区分 `task_config_explicit`、`local_config_explicit`、`auto_credentials` 和 `disabled_no_credentials`。
+- 本地高确定性地区规则新增：`大马/大馬 -> MY`、`Belgique -> EUR`、`CZ/SK -> EUR`。
+- 支持从国旗 emoji 解析 ISO 国家代码，例如 `🇫🇷 -> FR`、`🇨🇿🇸🇰 -> EUR`。
+- 两到三位地区代码可在紧贴中文时命中，例如 `HK朋友交換群組 -> HK`。
+
+GeoNames 仍只在更高优先级的明确地区规则无法确定结果时调用。
 
 ## V5.0.1 GeoNames 修复说明
 
@@ -25,12 +53,12 @@ Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Forc
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V5.0.1 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.0.1 同时修正蒙古语被通用西里尔字母规则误判为俄语的问题。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V5.2.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.2.0 同时保留此前对蒙古语误判为俄语的修复。
 
 
-## V5.0.1 GeoNames 外部地理解析兜底
+## GeoNames 外部地理解析兜底
 
-V5.0.1 在第二轮地区判断中加入 GeoNames。它用于处理群组名称或 About/简介中只出现城市、省、州等细粒度地名的情况，例如 `Ulaanbaatar`、`Cebu`、`California` 这类旧版未必能通过固定词典识别的位置。
+第二轮地区判断包含 GeoNames 外部验证兜底。它用于处理群组名称或 About/简介中只出现城市、省、州等细粒度地名的情况，例如 `Ulaanbaatar`、`Cebu`、`California` 这类旧版未必能通过固定词典识别的位置。
 
 调用逻辑是兜底式的：如果群名已经有明确国家/地区/大区，仍按原规则输出；只有原有链路无法确定地区时，才从群名和 About Location 中抽取疑似地名，调用 GeoNames 验证。通过验证后，GeoNames 返回的国家代码会映射为 Skill 的 `region`。歧义、低置信度、超时和无结果都不会中断采集。
 

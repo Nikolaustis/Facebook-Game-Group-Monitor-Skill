@@ -58,3 +58,15 @@
 - [ ] `exact_phrase_in_full_text` 记录应进入 `manual_review`，而不是 `detail`。
 - [ ] `compact_title_in_group_name` 可以进入 `detail`，但应能在 `debug_rows.json` 查到命中来源。
 - [ ] `connector_x_title_in_group_name` 只有通过更高活跃门槛后才可进入 `detail`。
+
+- [ ] 临时任务配置未含 `external_geocoder` 时，只要本地用户名存在，`audit_stats.json` 中 `external_geocoder_enabled=1` 且 `external_geocoder_enable_source` 合理。
+- [ ] 已抽查 `大马`、`Belgique`、`CZ/SK`、`🇫🇷`、`HK朋友交換群組` 等高确定性写法。
+
+
+## V5.2 地区误判专项检查
+
+- [ ] `™`、`®`、`©`、`℠` 未触发国家代码。
+- [ ] 小写 `de`、普通单词前缀 `tr` 等未触发 `DE/TR`。
+- [ ] `Québec`、`台中`、`台南`、`Trójmiasto`、`Danmark` 等样例输出正确。
+- [ ] `Come`、`Gift`、`Compra`、`trades`、`Bay`、`Only`、`Daily` 等未作为 GeoNames accepted 查询。
+- [ ] `audit_stats.json` 中 `external_geocoder_filtered_queries` 有合理统计，且 `external_geocoder_accepted` 抽样无泛词假阳性。

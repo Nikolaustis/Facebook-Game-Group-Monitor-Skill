@@ -1,7 +1,7 @@
 {
-  "name": "fb-group-monitor-skill-v5-0-1",
-  "version": "5.0.1",
-  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with GeoNames external geocoder fallback v5.0.1, Mongolian-vs-Russian language recognition, About-location region inference, background launch, autosave, Chrome close, and lock-screen-safe forced shutdown watching",
+  "name": "fb-group-monitor-skill-v5-2-0",
+  "version": "5.2.0",
+  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with strict short-code boundaries, precision-guarded GeoNames fallback, group-name city/province recognition, automatic GeoNames credential activation, Mongolian-vs-Russian language recognition, autosave, and lock-screen-safe forced shutdown watching",
   "private": true,
   "scripts": {
     "login": "powershell -ExecutionPolicy Bypass -File .\\scripts\\open_chrome_9222.ps1",

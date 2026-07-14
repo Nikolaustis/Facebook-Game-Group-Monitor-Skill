@@ -1,33 +1,28 @@
 ---
-
-## V5.0.1 GeoNames 修复说明
-
-V5.0.1 修复了 V5.0.0 中 GeoNames 全部返回 `network_error` 的问题。GeoNames endpoint 现在默认使用：
-
-```text
-http://api.geonames.org/searchJSON
-```
-
-如需 HTTPS，可在配置中改为：
-
-```text
-https://secure.geonames.org/searchJSON
-```
-
-不要使用 `https://api.geonames.org/searchJSON`。覆盖后建议删除旧 geocode cache：
-
-```powershell
-Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Force
-```
-
-新增审计字段：`__geocoder_attempted_queries`、`__geocoder_endpoint`、`__geocoder_error_reason`。
-
-name: fb-group-monitor-v5.0.0
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.0.1 支持 Codex 后台启动登录态验证、第一轮抓取和第二轮抓取，启动后应立即把控制权还给用户；第二轮默认每 30 分钟写入/输出 Codex 进度汇报；最终 Excel 报告生成后自动关闭 Chrome；用户明确要求完成后关机时，会通过独立 Node 监控器在锁屏状态下执行强制关机；同时以蒙古语专有西里尔字母与词组优先识别蒙古语，避免误判为俄语。
+name: fb-group-monitor-v5.2.0
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.2.0 在自动 GeoNames 兜底基础上新增短代码大写边界、商标符号防误判、群名城市/省州识别和 GeoNames 泛词安全过滤，避免 de、TM、Come、Gift 等非地点词导致错误地区；同时支持后台运行、断点保存、蒙古语/俄语区分、About 所在地兜底及锁屏状态强制关机。
 ---
 
-# Facebook Group Monitor V5.0.1
+# Facebook Group Monitor V5.2.0
 
+## V5.2.0 地区判断与 GeoNames 安全规则
+
+- 两到三位国家/地区代码必须在原始群名中以明确大写形式出现，并满足拉丁文字边界；小写介词、普通英文单词片段和 Unicode 兼容符号不得触发国家代码。
+- `™ / ® / © / ℠` 必须在 NFKC 归一化前移除，防止符号被转换为国家代码字母。
+- 群名中的高确定性城市、省州和地方别名应在 GeoNames 前判断；当前内置包括 `Québec`、`台中`、`台南/臺南`、`Trójmiasto`、`SoCal`，并支持 `Danmark -> EUR`。
+- GeoNames 查询必须先去除游戏名、翻译括号、交易/社群/邀请/等级/礼物等泛词；禁止将任意单个剩余词无条件作为地名。
+- 多词地点应优先保持连续短语，例如 `San Diego`、`El Paso TX`、`San Antonio`、`Fort Worth`、`Las Vegas`。
+- 不安全候选应记为 `unsafe_query` 并计入 `external_geocoder_filtered_queries`，不得写入缓存或 `region`。
+- GeoNames 缓存键使用 `geonames-v5.2` 版本前缀；旧版缓存不得影响新规则。
+
+## V5.1.0 GeoNames 启用规则与高确定性本地识别
+
+- 若任务配置显式提供 `external_geocoder.enabled`，必须尊重该值。
+- 若任务配置未提供启用开关，但本地私有配置或 `GEONAMES_USERNAME` 存在有效用户名，必须自动启用 GeoNames。
+- 本地私有配置默认路径为 `config/local/geonames.local.json`，该路径不得提交 GitHub。
+- 明确别名与国旗应在 GeoNames 前识别：`大马/大馬 -> MY`、`Belgique -> EUR`、`CZ/SK -> EUR`，以及可映射的 ISO 国旗 emoji。
+- 两到三位国家/地区代码允许在紧贴非拉丁文字时识别，例如 `HK朋友交換群組`；不得在普通英文单词内部误命中。
+- GeoNames 仍是兜底层，不得覆盖已由明确国家、地区、大区、别名或国旗得到的结果。
 
 ## V5.0.1 地区判断新增要求：GeoNames
 
