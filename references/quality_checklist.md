@@ -1,4 +1,4 @@
-# 质量检查清单 V5.2.1
+# 质量检查清单 V5.3.0
 
 ## 运行前
 
@@ -73,3 +73,22 @@
 - [ ] `Québec`、`台中`、`台南`、`Trójmiasto`、`Danmark` 等样例输出正确。
 - [ ] `Come`、`Gift`、`Compra`、`trades`、`Bay`、`Only`、`Daily` 等未作为 GeoNames accepted 查询。
 - [ ] `audit_stats.json` 中 `external_geocoder_filtered_queries` 有合理统计，且 `external_geocoder_accepted` 抽样无泛词假阳性。
+
+
+## V5.2.2 ID 与 About 裁决专项检查
+
+- [ ] `... ID Thailand` 只输出 `TH`，账号 ID 未命中印度尼西亚。
+- [ ] 旧 task_config 中即使存在 `region_keywords.ID=["id", ...]`，运行时仍会移除 `id`。
+- [ ] 群名多个不同地区命中时已检查 About 所在地。
+- [ ] About 的具体地区与群名证据相容时，输出 About 的更具体地区。
+- [ ] About 无法裁决时，同业务大区才回退大区；跨业务大区保持空值。
+
+
+## V5.3.0 游戏名与 XLSX 专项检查
+
+- [ ] `Cookie Run: Kingdom Buy and Sell International` 不产生 `cookie / run / kingdom` GeoNames query。
+- [ ] `Cookie Run Kingdom Paris` 删除游戏标题后仍能保留 `Paris` 地点候选。
+- [ ] `Cookie Run Kingdom ESPAÑOL` 群名去除游戏标题后识别为 `Spanish`。
+- [ ] 帖子正文中反复出现游戏标题时，标题不计入 English 证据。
+- [ ] `partial_verified_rows.xlsx` 的 K/L 数据单元格显示为 `0.00%`。
+- [ ] 正常最终和恢复最终 XLSX 的 K/L 数据单元格同样显示为 `0.00%`。

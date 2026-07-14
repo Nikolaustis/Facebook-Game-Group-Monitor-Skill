@@ -409,7 +409,7 @@ const DEFAULT_COUNTRY_REGION_KEYWORDS = {
   TH: ['th', 'thai', 'thailand', 'ประเทศไทย', 'ไทย'],
   VN: ['vn', 'viet nam', 'vietnam', 'việt nam'],
   PH: ['ph', 'pinoy', 'philippines', 'pilipinas'],
-  ID: ['id', 'indo', 'indonesia'],
+  ID: ['indo', 'indonesia'],
   MY: ['malaysia', 'malay', 'melayu', '大马', '大馬', '马来西亚', '馬來西亞'],
   SG: ['sg', 'singapore'],
   BN: ['brunei'],
@@ -584,6 +584,21 @@ function mergeKeywordMap(base, override) {
       const list = Array.isArray(vals) ? vals : [];
       out[mappedKey] = unique([...(out[mappedKey] || []), ...list.map((x) => clean(x)).filter(Boolean)]);
     }
+  }
+  return out;
+}
+
+function sanitizeCountryRegionKeywords(regionKeywords) {
+  const out = {};
+  for (const [region, values] of Object.entries(regionKeywords || {})) {
+    const list = Array.isArray(values) ? values : [];
+    // V5.2.2: a bare ID almost always means account/user ID in Facebook group names.
+    // Indonesia must be proven by Indonesia/Indo, Indonesian language, cities, flag, About
+    // location, or GeoNames. This sanitizer also protects old task_config.json files that
+    // still copied "id" from earlier templates.
+    out[region] = region === 'ID'
+      ? list.filter((value) => normalizeWords(value).trim().toLowerCase() !== 'id')
+      : [...list];
   }
   return out;
 }
@@ -843,10 +858,19 @@ function detectDiscussionLanguageFromPosts(discussionLanguageText) {
   return '';
 }
 
-function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussionLanguageText, snippet) {
-  const discussionEvidence = languageEvidenceText('', '', discussionLanguageText, '');
+function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussionLanguageText, snippet, titlePhrases = []) {
+  // V5.3: game titles are entity labels, not language evidence. Remove the current
+  // game's canonical title, aliases and controlled variants from every language source
+  // before scoring scripts/keywords. This prevents English title words such as
+  // "Cookie Run Kingdom" from overriding Spanish/Thai/etc. player content.
+  const languageGroupName = stripKnownGameTitlesFromText(groupName, titlePhrases);
+  const languageAboutText = stripKnownGameTitlesFromText(aboutLanguageText, titlePhrases);
+  const languageDiscussionText = stripKnownGameTitlesFromText(discussionLanguageText, titlePhrases);
+  const languageSnippet = stripKnownGameTitlesFromText(snippet, titlePhrases);
+
+  const discussionEvidence = languageEvidenceText('', '', languageDiscussionText, '');
   if (discussionEvidence) {
-    const postLevelLanguage = detectDiscussionLanguageFromPosts(discussionLanguageText);
+    const postLevelLanguage = detectDiscussionLanguageFromPosts(languageDiscussionText);
     if (postLevelLanguage) return postLevelLanguage;
 
     const discussionDetected = normalizeDetectedLanguage(detectLanguageSignal('', discussionEvidence, ''), discussionEvidence);
@@ -855,17 +879,17 @@ function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussi
     }
   }
 
-  const groupNameSignal = detectLanguageFromGroupName(groupName);
+  const groupNameSignal = detectLanguageFromGroupName(languageGroupName);
   if (groupNameSignal) {
     if (!discussionEvidence || groupNameSignal !== 'Chinese') return groupNameSignal;
   }
 
   if (discussionEvidence) {
-    const discussionDetected = normalizeDetectedLanguage(detectLanguageSignal(groupName || '', discussionEvidence, ''), discussionEvidence);
+    const discussionDetected = normalizeDetectedLanguage(detectLanguageSignal(languageGroupName || '', discussionEvidence, ''), discussionEvidence);
     if (discussionDetected && discussionDetected !== 'Unknown') return discussionDetected;
   }
 
-  const aboutEvidence = sanitizeAboutLanguageText(aboutLanguageText);
+  const aboutEvidence = sanitizeAboutLanguageText(languageAboutText);
   if (aboutEvidence) {
     const aboutDetected = normalizeDetectedLanguage(detectLanguageSignal('', aboutEvidence, ''), aboutEvidence);
     // About text is lowest priority and may contain localized Facebook structure text.
@@ -873,7 +897,7 @@ function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussi
     if (aboutDetected && aboutDetected !== 'Unknown' && aboutDetected !== 'Chinese') return aboutDetected;
   }
 
-  const fallbackEvidence = languageEvidenceText(groupName, '', '', snippet);
+  const fallbackEvidence = languageEvidenceText(languageGroupName, '', '', languageSnippet);
   const fallbackDetected = normalizeDetectedLanguage(detectLanguageSignal('', fallbackEvidence, ''), fallbackEvidence);
   return fallbackDetected || 'Unknown';
 }
@@ -1409,11 +1433,13 @@ function pushSafeGeocoderCandidate(candidates, value, source = 'group_name') {
   candidates.push(normalized);
 }
 
-function extractGeocoderQueriesFromGroupName(groupName, gameName, allGameNames, maxQueries) {
+function extractGeocoderQueriesFromGroupName(groupName, gameTitlePhrases, maxQueries) {
   const original = clean(groupName || '');
   if (!original) return [];
-  const titles = unique([gameName].concat(allGameNames || [])).filter(Boolean);
-  const withoutTranslation = removeAsciiTranslationParentheses(original)
+  const titles = expandKnownGameTitlePhrases(gameTitlePhrases || []);
+  // V5.3: strip the complete current-game title/aliases before generating any GeoNames
+  // candidate. Token cleanup remains as a second guard for fused or punctuated variants.
+  const withoutTranslation = stripKnownGameTitlesFromText(removeAsciiTranslationParentheses(original), titles)
     .replace(/[™®©℠]/g, ' ');
 
   const candidates = [];
@@ -1733,9 +1759,9 @@ async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
     return { status: 'unsafe_query', source, query: normalizedQuery, reason: safety.reason };
   }
   const endpointKey = normalizeGeonamesEndpoint(externalGeocoder.endpoint);
-  // V5.2 cache namespace invalidates earlier accepted false positives and separates the
+  // V5.3 cache namespace invalidates earlier accepted false positives and separates the
   // stricter group-name evaluation from explicit About > Location lookups.
-  const cacheKey = `geonames-v5.2|${endpointKey}|${source}|${normalizedQuery}`;
+  const cacheKey = `geonames-v5.3|${endpointKey}|${source}|${normalizedQuery}`;
   const cached = cache ? cache.get(cacheKey) : null;
   if (cached) {
     if (stats) stats.external_geocoder_cache_hits = (stats.external_geocoder_cache_hits || 0) + 1;
@@ -1753,8 +1779,7 @@ async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
 async function runExternalGeocoderFallback({
   groupName,
   aboutLocationText,
-  gameName,
-  allGameNames,
+  gameTitlePhrases,
   externalGeocoder,
   geocodeCache,
   stats,
@@ -1764,7 +1789,7 @@ async function runExternalGeocoderFallback({
   const sources = Array.isArray(preferredSources) && preferredSources.length ? preferredSources : externalGeocoder.sources;
   const querySpecs = [];
   if (sources.includes('group_name')) {
-    for (const q of extractGeocoderQueriesFromGroupName(groupName, gameName, allGameNames, externalGeocoder.max_queries_per_group)) {
+    for (const q of extractGeocoderQueriesFromGroupName(groupName, gameTitlePhrases, externalGeocoder.max_queries_per_group)) {
       querySpecs.push({ source: 'group_name', query: q });
     }
   }
@@ -1833,6 +1858,32 @@ function geocoderAuditFields(geo) {
   };
 }
 
+function distinctMatchedRegions(regionMatch) {
+  return unique((Array.isArray(regionMatch?.keyword_hits) ? regionMatch.keyword_hits : [])
+    .map((hit) => normalizeRegionOutput(hit?.region))
+    .filter(Boolean));
+}
+
+function hasMultipleRegionEvidence(regionMatch) {
+  return distinctMatchedRegions(regionMatch).length > 1;
+}
+
+function isAboutRegionCompatibleWithGroupEvidence(aboutRegion, groupNameMatch) {
+  const about = normalizeRegionOutput(aboutRegion);
+  if (!about) return false;
+  const groupRegions = distinctMatchedRegions(groupNameMatch);
+  if (!groupRegions.length) return true;
+  if (groupRegions.includes(about)) return true;
+  const aboutBucket = normalizeSameBusinessRegionBucket(about);
+  return Boolean(aboutBucket && groupRegions.some((region) => normalizeSameBusinessRegionBucket(region) === aboutBucket));
+}
+
+function groupNameFallbackAfterAboutAdjudication(groupNameMatch) {
+  const region = normalizeRegionOutput(groupNameMatch?.region || '');
+  if (region && String(groupNameMatch?.source || '').endsWith('_same_business_region')) return region;
+  return '';
+}
+
 async function resolveRegionV5({
   groupName,
   languageSignal,
@@ -1844,11 +1895,81 @@ async function resolveRegionV5({
   externalGeocoder,
   geocodeCache,
   stats,
-  gameName,
-  allGameNames,
+  gameTitlePhrases,
 }) {
   const normalizedLocation = clean(aboutLocationText || '');
   const groupNameMatch = detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords, aboutLocationCityKeywords);
+  const groupNameHasMultipleRegions = hasMultipleRegionEvidence(groupNameMatch);
+
+  // V5.2.2: multiple distinct geographic signals in the group name are not allowed to
+  // collapse immediately to a broad business region. About > Location is already fetched
+  // for phase 2, so use its explicit location (or GeoNames result) to adjudicate first.
+  // Example: TH + ID with Bangkok in About resolves to TH. If About cannot adjudicate,
+  // same-business evidence may fall back to its broad bucket; cross-business conflict stays blank.
+  if (groupNameHasMultipleRegions) {
+    const aboutLocationMatch = detectRegionByAboutLocation(
+      normalizedLocation,
+      countryRegionKeywords,
+      directRegionKeywords,
+      aboutLocationCityKeywords,
+    );
+    if (
+      aboutLocationMatch.source &&
+      aboutLocationMatch.source !== 'about_location_keyword_conflict' &&
+      aboutLocationMatch.region &&
+      isAboutRegionCompatibleWithGroupEvidence(aboutLocationMatch.region, groupNameMatch)
+    ) {
+      return {
+        region: normalizeRegionOutput(aboutLocationMatch.region),
+        source: 'about_location_adjudicated_group_name_conflict',
+        group_name_match: groupNameMatch,
+        about_location_match: aboutLocationMatch,
+        about_location: normalizedLocation,
+        used_about_location: true,
+        external_geocoder: { status: 'not_needed' },
+      };
+    }
+
+    const geoAbout = await runExternalGeocoderFallback({
+      groupName: '',
+      aboutLocationText: normalizedLocation,
+      gameTitlePhrases,
+      externalGeocoder,
+      geocodeCache,
+      stats,
+      preferredSources: ['about_location'],
+    });
+    if (
+      geoAbout.status === 'accepted' &&
+      geoAbout.region &&
+      isAboutRegionCompatibleWithGroupEvidence(geoAbout.region, groupNameMatch)
+    ) {
+      return {
+        region: normalizeRegionOutput(geoAbout.region),
+        source: 'external_geocoder_about_location_adjudicated_group_name_conflict',
+        group_name_match: groupNameMatch,
+        about_location_match: aboutLocationMatch,
+        about_location: normalizedLocation,
+        used_about_location: true,
+        external_geocoder: geoAbout,
+      };
+    }
+
+    const fallbackRegion = groupNameFallbackAfterAboutAdjudication(groupNameMatch);
+    return {
+      region: fallbackRegion,
+      source: fallbackRegion
+        ? `${groupNameMatch.source}_about_unresolved`
+        : (aboutLocationMatch.source || groupNameMatch.source || 'keyword_conflict'),
+      group_name_match: groupNameMatch,
+      about_location_match: aboutLocationMatch,
+      about_location: normalizedLocation,
+      used_about_location: false,
+      external_geocoder: geoAbout.status && geoAbout.status !== 'disabled' && geoAbout.status !== 'no_candidate_query'
+        ? geoAbout
+        : { status: geoAbout.status || 'not_needed' },
+    };
+  }
 
   if (groupNameMatch.source && groupNameMatch.source !== 'keyword_conflict' && groupNameMatch.region) {
     return {
@@ -1871,8 +1992,7 @@ async function resolveRegionV5({
     : await runExternalGeocoderFallback({
       groupName,
       aboutLocationText: '',
-      gameName,
-      allGameNames,
+      gameTitlePhrases,
       externalGeocoder,
       geocodeCache,
       stats,
@@ -1926,8 +2046,7 @@ async function resolveRegionV5({
   const geoAbout = await runExternalGeocoderFallback({
     groupName: '',
     aboutLocationText: normalizedLocation,
-    gameName,
-    allGameNames,
+    gameTitlePhrases,
     externalGeocoder,
     geocodeCache,
     stats,
@@ -2037,6 +2156,47 @@ function normalizeWords(s) {
 
 function unique(arr) {
   return Array.from(new Set(arr.filter(Boolean)));
+}
+
+function splitCamelCaseTitle(s) {
+  return clean(s)
+    .replace(/([\p{Ll}\p{Number}])([\p{Lu}])/gu, '$1 $2')
+    .replace(/([\p{Letter}])([0-9])/gu, '$1 $2')
+    .replace(/([0-9])([\p{Letter}])/gu, '$1 $2');
+}
+
+function expandKnownGameTitlePhrases(titlePhrases) {
+  const out = [];
+  for (const value of titlePhrases || []) {
+    const raw = clean(value);
+    if (!raw) continue;
+    out.push(raw);
+    const camelSplit = splitCamelCaseTitle(raw);
+    if (camelSplit && camelSplit !== raw) out.push(camelSplit);
+    const normalized = normalizeWords(camelSplit || raw).trim();
+    if (normalized) out.push(normalized);
+  }
+  return unique(out).sort((a, b) => normalizeCompact(b).length - normalizeCompact(a).length);
+}
+
+function stripKnownGameTitlesFromText(text, titlePhrases) {
+  let out = String(text || '');
+  for (const phrase of expandKnownGameTitlePhrases(titlePhrases)) {
+    const tokens = splitCamelCaseTitle(phrase).normalize('NFKC').match(/[\p{Letter}\p{Number}]+/gu) || [];
+    if (!tokens.length) continue;
+    const body = tokens.map((token) => escapeRegExp(token)).join('[\\s\\p{P}\\p{S}_]*');
+    const pattern = new RegExp(`(?<![\\p{Letter}\\p{Number}])${body}(?![\\p{Letter}\\p{Number}])`, 'giu');
+    out = out.replace(pattern, ' ');
+  }
+  return out;
+}
+
+function buildCurrentGameTitleMaskPhrases(profile) {
+  return unique([
+    ...((profile && profile.rawPhrases) || []),
+    ...((profile && profile.configuredTitleVariants) || []).map((item) => clean(item && item.query)),
+    ...((profile && profile.ipRootRawPhrases) || []).filter((value) => normalizeCompact(value).length >= 4),
+  ]);
 }
 
 function tokenizeStrong(s) {
@@ -2777,15 +2937,17 @@ function buildDetailSheet(rows, fields, formulaFields) {
       ws[`G${excelRow}`].z = '@';
     }
   });
-  ws['!cols'] = [
-    { wch: 12, z: '@' },
-    { wch: 10 },
-    { wch: 14 },
-    { wch: 26 },
-    { wch: 46 },
-    { wch: 48 },
-    { wch: 22, z: '@' },
-  ];
+  ws['!cols'] = fields.map((field) => {
+    if (field === 'snapshot_date') return { wch: 12, z: '@' };
+    if (field === 'region') return { wch: 14 };
+    if (field === 'language') return { wch: 14 };
+    if (field === 'game_name') return { wch: 26 };
+    if (field === 'group_name') return { wch: 46 };
+    if (field === 'group_url') return { wch: 48 };
+    if (field === 'group_id') return { wch: 22, z: '@' };
+    if (field === formulaFields.activeIndex || field === formulaFields.growthRate) return { wch: 18, z: '0.00%' };
+    return { wch: 18 };
+  });
   return ws;
 }
 
@@ -2848,11 +3010,11 @@ function writeWorkbookAtomic(file, wb) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp.xlsx`);
   try {
-    XLSX.writeFile(wb, tmp);
+    XLSX.writeFile(wb, tmp, { bookType: 'xlsx', cellStyles: true });
     try {
       renameOverwriting(tmp, file);
     } catch (err) {
-      XLSX.writeFile(wb, file);
+      XLSX.writeFile(wb, file, { bookType: 'xlsx', cellStyles: true });
       try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_e) { /* ignore */ }
     }
   } catch (err) {
@@ -3017,7 +3179,7 @@ function resolveCollisions(rows) {
     ...DEFAULT_LANGUAGE_TO_REGION,
     ...(config.language_to_region && typeof config.language_to_region === 'object' ? config.language_to_region : {}),
   };
-  const regionKeywords = mergeKeywordMap(DEFAULT_COUNTRY_REGION_KEYWORDS, config.region_keywords || config.country_region_keywords);
+  const regionKeywords = sanitizeCountryRegionKeywords(mergeKeywordMap(DEFAULT_COUNTRY_REGION_KEYWORDS, config.region_keywords || config.country_region_keywords));
   const directRegionKeywords = mergeKeywordMap(DEFAULT_DIRECT_REGION_KEYWORDS, config.direct_region_keywords);
   const aboutLocationCityKeywords = mergeKeywordMap(DEFAULT_ABOUT_LOCATION_CITY_KEYWORDS, config.about_location_city_keywords);
   const allowedLanguageSignals = Array.isArray(config.allowed_language_signals)
@@ -3322,6 +3484,11 @@ function resolveCollisions(rows) {
       currentGameName = gameName;
       currentGameIndex = gameIdx + 1;
       const profile = profiles.get(gameName);
+      const languageTitlePhrases = buildCurrentGameTitleMaskPhrases(profile);
+      const geocoderExcludedTitlePhrases = unique([
+        ...languageTitlePhrases,
+        ...allGameNames,
+      ]);
       const candidates = JSON.parse(fs.readFileSync(g.candidates_file, 'utf8'));
       currentCandidateTotal = candidates.length;
       const resumeCurrentGame = resumeProgress && currentGameIndex === Number(resumeProgress.current_game_index || -1);
@@ -3402,7 +3569,7 @@ function resolveCollisions(rows) {
         const existed = extractExistedLastMonth(aboutText);
         const match = matchGame(profile, candidateGroupName, aboutText, c.snippet);
         const thresholdSpec = thresholdSpecForMatch(match, threshold);
-        let languageSignal = detectLanguageSignalFromEvidence(candidateGroupName, aboutLanguageText, '', '');
+        let languageSignal = detectLanguageSignalFromEvidence(candidateGroupName, aboutLanguageText, '', '', languageTitlePhrases);
         const aboutLocationText = clean(about.location_text || '');
         let regionResolution = await resolveRegionV5({
           groupName: candidateGroupName,
@@ -3415,8 +3582,7 @@ function resolveCollisions(rows) {
           externalGeocoder,
           geocodeCache,
           stats,
-          gameName,
-          allGameNames,
+          gameTitlePhrases: geocoderExcludedTitlePhrases,
         });
         let region = regionResolution.region;
 
@@ -3545,7 +3711,8 @@ function resolveCollisions(rows) {
           candidateGroupName,
           aboutLanguageText,
           discussionLanguage.ok ? discussionLanguage.text : '',
-          ''
+          '',
+          languageTitlePhrases
         );
         regionResolution = await resolveRegionV5({
           groupName: candidateGroupName,
@@ -3558,8 +3725,7 @@ function resolveCollisions(rows) {
           externalGeocoder,
           geocodeCache,
           stats,
-          gameName,
-          allGameNames,
+          gameTitlePhrases: geocoderExcludedTitlePhrases,
         });
         region = regionResolution.region;
         row.language_signal = languageSignal;

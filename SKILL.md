@@ -1,10 +1,26 @@
 ---
-name: fb-group-monitor-v5.2.1
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.2.1 要求人工复核候选先通过与普通明细一致的成员规模和活跃度门槛，低价值候选不再进入 manual_review；同时保留 V5.2.0 的 GeoNames 地区精度、蒙古语/俄语区分、断点保存与锁屏强制关机能力。
+name: fb-group-monitor-v5.3.0
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.3.0 在 GeoNames 与语言识别前剔除当前游戏名称及别名，并保证 K/L 指标列以 0.00% 百分比格式输出；同时保留 ID 误判保护、About 地区冲突裁决、阈值门控人工复核、GeoNames 地区精度、蒙古语/俄语区分、断点保存与锁屏强制关机能力。
 ---
 
-# Facebook Group Monitor V5.2.1
+# Facebook Group Monitor V5.3.0
 
+
+## V5.3.0 游戏名称屏蔽与 XLSX 格式
+
+- GeoNames 查询候选必须先移除当前游戏正式名称、aliases、受控标题变体和高确定性 IP 根词；不得将 `cookie / run / kingdom` 等游戏标题组成词发送给 GeoNames。
+- 语言识别前，对群名、About 用户文本及前五条讨论帖子执行同一套游戏名称屏蔽；游戏标题不计入 English 或其他语言证据。
+- 例如 `Cookie Run Kingdom ESPAÑOL` 在移除游戏标题后保留 `ESPAÑOL`，应识别为 `Spanish`。
+- K/L 列必须为公式单元格，数字格式固定为 `0.00%`；该规则同时覆盖暂存、正常最终和恢复最终工作簿。
+- GeoNames 缓存键前缀为 `geonames-v5.3`。
+
+## V5.2.2 地区冲突裁决
+
+- 孤立大写 `ID` 视为账号/用户 ID，不得直接映射为印度尼西亚。
+- 旧任务配置中的 `region_keywords.ID: ["id", ...]` 会在运行时自动清理。
+- 群名命中两个或更多不同地区时，必须读取 About 所在地，并优先使用与群名证据相容的明确国家、城市、省州或 GeoNames 结果。
+- About 无法裁决时，同一业务大区多命中才回退至 `SEA / EA / EUR`；跨业务大区冲突保持空地区。
+- 新来源值包括 `about_location_adjudicated_group_name_conflict` 和 `external_geocoder_about_location_adjudicated_group_name_conflict`。
 
 ## V5.2.1 人工复核数据门槛
 

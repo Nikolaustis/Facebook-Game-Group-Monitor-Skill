@@ -54,7 +54,7 @@ function writeWorkbookAtomic(file, wb) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp.xlsx`);
   try {
-    XLSX.writeFile(wb, tmp);
+    XLSX.writeFile(wb, tmp, { bookType: 'xlsx', cellStyles: true });
     renameOverwriting(tmp, file);
   } catch (err) {
     try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_e) { /* ignore */ }
@@ -238,6 +238,7 @@ ws['!cols'] = fields.map((field) => {
   if (field === 'group_id') return { wch: 22, z: '@' };
   if (field === 'group_url') return { wch: 48 };
   if (field === 'group_name') return { wch: 42 };
+  if (field === '活跃指数=当日新帖/社群规模' || field === '规模增速=上周新增/(社群规模-上周新增）') return { wch: 18, z: '0.00%' };
   return { wch: 18 };
 });
 
