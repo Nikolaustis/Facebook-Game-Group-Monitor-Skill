@@ -1,9 +1,18 @@
 ---
-name: fb-group-monitor-v5.2.0
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.2.0 在自动 GeoNames 兜底基础上新增短代码大写边界、商标符号防误判、群名城市/省州识别和 GeoNames 泛词安全过滤，避免 de、TM、Come、Gift 等非地点词导致错误地区；同时支持后台运行、断点保存、蒙古语/俄语区分、About 所在地兜底及锁屏状态强制关机。
+name: fb-group-monitor-v5.2.1
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.2.1 要求人工复核候选先通过与普通明细一致的成员规模和活跃度门槛，低价值候选不再进入 manual_review；同时保留 V5.2.0 的 GeoNames 地区精度、蒙古语/俄语区分、断点保存与锁屏强制关机能力。
 ---
 
-# Facebook Group Monitor V5.2.0
+# Facebook Group Monitor V5.2.1
+
+
+## V5.2.1 人工复核数据门槛
+
+- `manual_review` 仅用于“相关性证据需要人工判断、但运营数据已经达标”的候选。
+- 候选必须先满足 `group_size >= 100`，并满足 `today_posts >= threshold` 或 `week_new_fans >= threshold`，才可进入人工复核。
+- 未达到规模或活跃门槛的弱相关候选直接丢弃，不再占用人工复核队列。
+- 人工复核表新增 `group_size`、`today_posts`、`week_new_fans`，便于人工确认业务价值。
+- `audit_stats.json` 新增 `manual_review_candidates`、`manual_review_dropped_threshold`、`manual_review_dropped_group_size`、`manual_review_dropped_activity`。
 
 ## V5.2.0 地区判断与 GeoNames 安全规则
 
@@ -132,7 +141,7 @@ source_query, query_variant_type, source_game_name, source_is_seed_url, source_q
 - `group_name` 命中去空格/少空格标题，作为 `compact_title_in_group_name` 正样本。
 - `group_name` 命中配置 allowlist 中的 X 连接变体，作为 `connector_x_title_in_group_name` 弱正样本，必须通过更高活跃门槛。
 - 多游戏批量检索时，自动把同批次其他游戏作为兄弟标题排斥，避免互相串群。
-- 仅 IP 大词根命中、仅 full_text 命中、`exact_phrase_in_full_text` 等记录进入人工复核 sheet。
+- 仅 IP 大词根命中、仅 full_text 命中、`exact_phrase_in_full_text` 等记录只有在成员规模与活跃度门槛均达标后才进入人工复核 sheet。
 - 同一个 `group_url` 只能归属一个游戏；最高分并列冲突写入 `collision_report.json`。
 
 活跃阈值：

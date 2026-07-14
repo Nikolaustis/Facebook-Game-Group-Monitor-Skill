@@ -1,4 +1,4 @@
-# Excel 字段规范（V4.1.0）
+# Excel 字段规范（V5.2.1）
 
 V3.6.1 起不再读写或保存 CSV。第二轮只输出 `fb_monitoring_filtered.xlsx`，并在同一个工作簿中包含：
 
@@ -40,8 +40,10 @@ snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size
 ## manual_review 固定列顺序
 
 ```text
-snapshot_date,game_name,group_name,group_url,language_signal,region,about_location,match_type,matched_phrase,negative_hit,review_reason,source_query,query_variant_type,source_is_seed_url,variant_threshold_applied
+snapshot_date,game_name,group_name,group_url,group_size,today_posts,week_new_fans,language_signal,region,about_location,match_type,matched_phrase,negative_hit,review_reason,source_query,query_variant_type,source_is_seed_url,variant_threshold_applied
 ```
+
+`manual_review` 仅保留已经通过 `group_size >= 100` 且满足 `today_posts >= threshold` 或 `week_new_fans >= threshold` 的弱相关候选。
 
 ## debug_rows.json 字段
 

@@ -2334,6 +2334,25 @@ function thresholdSpecForMatch(match, globalThreshold) {
   };
 }
 
+function evaluateThreshold(row, thresholdSpec) {
+  const postsNum = toInt(row.today_posts);
+  const fansNum = toInt(row.week_new_fans);
+  const sizeNum = toInt(row.group_size);
+  const passGroupSize = typeof sizeNum === 'number' && Number.isFinite(sizeNum) && sizeNum >= thresholdSpec.group_size;
+  const passPosts = typeof postsNum === 'number' && Number.isFinite(postsNum) && postsNum >= thresholdSpec.today_posts;
+  const passFans = typeof fansNum === 'number' && Number.isFinite(fansNum) && fansNum >= thresholdSpec.week_new_fans;
+  return {
+    size_num: sizeNum,
+    posts_num: postsNum,
+    fans_num: fansNum,
+    pass_group_size: passGroupSize,
+    pass_posts: passPosts,
+    pass_fans: passFans,
+    pass_activity: passPosts || passFans,
+    passed: passGroupSize && (passPosts || passFans),
+  };
+}
+
 function riskLevel(row) {
   const full = row.group_size !== '' && row.today_posts !== '' && row.week_new_fans !== '' && row.existed_last_month !== '';
   if (row.__match_type === 'exact_phrase_in_group_name' && full) return 'low';
@@ -3072,6 +3091,10 @@ function resolveCollisions(rows) {
       dropped_lang_region: 0,
       dropped_threshold: 0,
       dropped_collision: 0,
+      manual_review_candidates: 0,
+      manual_review_dropped_threshold: 0,
+      manual_review_dropped_group_size: 0,
+      manual_review_dropped_activity: 0,
       manual_review_rows: 0,
       output_rows: 0,
       external_geocoder_enabled: externalGeocoder.enabled ? 1 : 0,
@@ -3430,12 +3453,43 @@ function resolveCollisions(rows) {
           ...geocoderAuditFields(regionResolution.external_geocoder),
         };
 
+        const thresholdEvaluation = evaluateThreshold(row, thresholdSpec);
+
         if (match.manual_review) {
+          stats.manual_review_candidates++;
+          if (!thresholdEvaluation.pass_group_size) {
+            stats.dropped_threshold++;
+            stats.manual_review_dropped_threshold++;
+            stats.manual_review_dropped_group_size++;
+            markCandidateCheckpoint('manual_review_dropped_threshold_group_size', {
+              match_type: match.type || '',
+              group_size: row.group_size,
+              required_group_size: thresholdSpec.group_size,
+            });
+            continue;
+          }
+          if (!thresholdEvaluation.pass_activity) {
+            stats.dropped_threshold++;
+            stats.manual_review_dropped_threshold++;
+            stats.manual_review_dropped_activity++;
+            markCandidateCheckpoint('manual_review_dropped_threshold_activity', {
+              match_type: match.type || '',
+              today_posts: row.today_posts,
+              week_new_fans: row.week_new_fans,
+              required_today_posts: thresholdSpec.today_posts,
+              required_week_new_fans: thresholdSpec.week_new_fans,
+            });
+            continue;
+          }
+
           manualReviewRows.push({
             snapshot_date: row.snapshot_date,
             game_name: row.game_name,
             group_name: row.group_name,
             group_url: row.group_url,
+            group_size: row.group_size,
+            today_posts: row.today_posts,
+            week_new_fans: row.week_new_fans,
             language_signal: row.language_signal,
             region: row.region,
             about_location: row.__region_location,
@@ -3448,6 +3502,14 @@ function resolveCollisions(rows) {
             source_is_seed_url: row.__source_is_seed_url,
             variant_threshold_applied: row.__variant_threshold_applied,
           });
+          stats.dropped_not_relevant++;
+          markCandidateCheckpoint('manual_review_accepted', {
+            match_type: match.type || '',
+            group_size: row.group_size,
+            today_posts: row.today_posts,
+            week_new_fans: row.week_new_fans,
+          });
+          continue;
         }
 
         if (row.is_relevant !== 'yes') {
@@ -3456,17 +3518,12 @@ function resolveCollisions(rows) {
           continue;
         }
 
-        const postsNum = toInt(row.today_posts);
-        const fansNum = toInt(row.week_new_fans);
-        const sizeNum = toInt(row.group_size);
-        if (!(typeof sizeNum === 'number' && Number.isFinite(sizeNum) && sizeNum >= thresholdSpec.group_size)) {
+        if (!thresholdEvaluation.pass_group_size) {
           stats.dropped_threshold++;
           markCandidateCheckpoint('dropped_threshold_group_size');
           continue;
         }
-        const passPosts = typeof postsNum === 'number' && Number.isFinite(postsNum) && postsNum >= thresholdSpec.today_posts;
-        const passFans = typeof fansNum === 'number' && Number.isFinite(fansNum) && fansNum >= thresholdSpec.week_new_fans;
-        if (!passPosts && !passFans) {
+        if (!thresholdEvaluation.pass_activity) {
           stats.dropped_threshold++;
           markCandidateCheckpoint('dropped_threshold_activity');
           continue;
@@ -3579,6 +3636,9 @@ function resolveCollisions(rows) {
         'game_name',
         'group_name',
         'group_url',
+        'group_size',
+        'today_posts',
+        'week_new_fans',
         'language_signal',
         'region',
         'about_location',

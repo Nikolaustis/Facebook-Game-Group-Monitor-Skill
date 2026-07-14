@@ -1,4 +1,4 @@
-# 质量检查清单 V4.1.0
+# 质量检查清单 V5.2.1
 
 ## 运行前
 
@@ -56,6 +56,9 @@
 - [ ] `Ragnarok` 各子标题不应仅靠词根互相命中。
 - [ ] `group_name` 命中兄弟游戏标题的记录，不应进入 `detail`。
 - [ ] `exact_phrase_in_full_text` 记录应进入 `manual_review`，而不是 `detail`。
+- [ ] `manual_review` 中每条记录均满足 `group_size >= 100`，且 `today_posts >= threshold` 或 `week_new_fans >= threshold`。
+- [ ] `manual_review` 包含 `group_size`、`today_posts`、`week_new_fans` 三列。
+- [ ] `audit_stats.json` 中 `manual_review_dropped_group_size` 与 `manual_review_dropped_activity` 统计合理。
 - [ ] `compact_title_in_group_name` 可以进入 `detail`，但应能在 `debug_rows.json` 查到命中来源。
 - [ ] `connector_x_title_in_group_name` 只有通过更高活跃门槛后才可进入 `detail`。
 

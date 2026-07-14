@@ -1,4 +1,4 @@
-# 判定与过滤规则（V4.1.0 受控标题变体版）
+# 判定与过滤规则（V5.2.1）
 
 ## A. 第一轮：搜索与深翻页
 1. Skill 支持一次任务同时检索多个游戏。每个游戏必须独立生成搜索计划，不能把某个游戏的特殊变体扩散到其他游戏。
@@ -85,19 +85,27 @@
 - 同一 `group_url` 归属冲突且最高分并列。
 
 ## G. 人工复核队列
-以下记录进入 Excel 的 `manual_review` 工作表，且不得混入 `detail` 工作表：
+人工复核是相关性复核，不是低质量候选暂存区。以下弱相关记录只有在先通过数据门槛后，才进入 Excel 的 `manual_review` 工作表，且不得混入 `detail`：
 - 仅 `full_text` 命中目标完整标题。
 - `group_name` 命中 IP 大词根但未命中目标完整标题。
 - `group_name` 命中兄弟游戏标题。
 - `match_type = exact_phrase_in_full_text`。
 
-`manual_review` 至少包含以下字段：
+人工复核数据门槛与普通命中一致：
+- `group_size >= 100`；
+- 且 `today_posts >= threshold` 或 `week_new_fans >= threshold`。
+
+任何一项不达标时直接丢弃，不进入 `manual_review`。`manual_review` 至少包含以下字段：
 - `snapshot_date`
 - `game_name`
 - `group_name`
 - `group_url`
+- `group_size`
+- `today_posts`
+- `week_new_fans`
 - `language_signal`
 - `region`
+- `about_location`
 - `match_type`
 - `matched_phrase`
 - `negative_hit`
@@ -145,3 +153,10 @@
 20. GeoNames 查询必须通过泛词和句子安全检查。交易、礼物、邀请、社群、等级、英文翻译句等非地点词不得请求 GeoNames。
 21. 多词地点优先保持完整短语；若首个结果歧义，可继续尝试后续更明确候选。
 22. `unsafe_query` 不得写入缓存或地区结果，并计入 `external_geocoder_filtered_queries`。
+
+
+## V5.2.1 人工复核门槛补充
+
+23. `manual_review` 写入必须发生在规模与活跃阈值验证之后。
+24. `audit_stats.json` 必须分别记录人工复核候选数、因规模不达标淘汰数、因活跃度不达标淘汰数。
+25. 人工复核表必须展示 `group_size`、`today_posts`、`week_new_fans`，避免人工复核无业务价值的候选。
