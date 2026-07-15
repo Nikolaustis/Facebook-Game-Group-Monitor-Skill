@@ -1,4 +1,4 @@
-# 质量检查清单 V5.5.0
+# 质量检查清单 V5.6.0
 
 ## 运行前
 
@@ -110,3 +110,14 @@
 - [ ] 群名 `Paris / Boston / San Diego` 等精确地点仍可由 GeoNames 接受。
 - [ ] 包含式结果如 `talk -> Town Talk` 被标记为 `rejected_context_mismatch`。
 - [ ] `audit_stats.json.external_geocoder_rejected_context` 统计合理。
+
+
+## V5.6.0 GeoNames 多语种过滤专项检查
+
+- [ ] `Talk&Trade / Green Town / Jual Beli / Mua Bán / ซื้อขาย / بيع وشراء` 不产生 GeoNames query。
+- [ ] `PokeMonedas / Pok'emon` 不产生 `edas / pok / emon` 残词。
+- [ ] `San Diego / El Paso TX / San Antonio / Fort Worth` 不降级为最后一个单词。
+- [ ] `Orange County / Victoria BC / Santa Rosa` 保留完整短语；孤立 `Orange / Victoria / Santa` 被拦截。
+- [ ] `™ / de / ID / MY / TR / TM` 不被孤立解释为地区。
+- [ ] `Hàn Quốc / Danmark / Belgique / Schweiz / Trójmiasto / LATHAM / GDL / SEQ Brisbane` 输出预期地区。
+- [ ] `audit_stats.json.external_geocoder_context_restricted_queries` 和 `external_geocoder_filtered_queries` 可正常统计。

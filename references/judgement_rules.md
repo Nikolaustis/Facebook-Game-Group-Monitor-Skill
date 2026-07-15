@@ -1,4 +1,4 @@
-# 判定与过滤规则（V5.5.0）
+# 判定与过滤规则（V5.6.0）
 
 ## A. 第一轮：搜索与深翻页
 1. Skill 支持一次任务同时检索多个游戏。每个游戏必须独立生成搜索计划，不能把某个游戏的特殊变体扩散到其他游戏。
@@ -171,3 +171,15 @@
 30. 泰语、印尼语、马来语交易词、普通社群词、游戏系列词和孤立非拉丁文字 token 不得成为群名 GeoNames query。
 31. GeoNames query 屏蔽集合应包含本批次所有游戏实体名称、aliases、兄弟标题、IP roots 与受控变体。
 32. 缓存使用 `geonames-v5.5` namespace；旧缓存不得影响 V5.5.0。
+
+
+## V5.6.0 GeoNames 候选安全规则
+
+33. 群名进入 GeoNames 前必须清除所有已知游戏名称、别名、兄弟标题、IP root 和受控变体；包含游戏实体的融合 token 整体删除，不得产生残词。
+34. 多词候选只保留完整地点短语，不得生成其任意单词子集；只有清洗后本来就是单 token 时才允许单 token 查询。
+35. 英/泰/越/印尼/马来/西/葡/法/中/阿语的交易、社区、邀请码、活动、账号等词属于硬停用词。
+36. `Bay / Santa / Orange / Victoria / Georgia / Phoenix / Classic / Beta / Mania / League / Latham` 等属于上下文受限词：孤立出现不得查询，带 `County / State / BC / USA` 等明确上下文的完整短语可查询。
+37. 群名单 token GeoNames accepted 需满足：精确名称匹配，且 feature code 为国家、ADM1、首府/PPLA，或人口不少于配置值（默认 50,000）。
+38. `ID / IN / IT / NO / TO / ME / MY / LA / DE / TR / TM / AT / IS / BE` 不得作为孤立国家码；完整国家名、国旗、语言、城市或 About 证据仍可判定。
+39. `Georgia` 单独出现不得直接解释为格鲁吉亚；需 `Georgia country / საქართველო`、About 或 GeoNames 上下文。
+40. 缓存使用 `geonames-v5.6` namespace。

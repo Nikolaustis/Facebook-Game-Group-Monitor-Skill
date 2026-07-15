@@ -1,10 +1,22 @@
 ---
-name: fb-group-monitor-v5.5.0
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.5.0 将 About 所在地和高确定性语言置于群名模糊 GeoNames 之前，并要求群名 GeoNames 结果为精确地名匹配，系统性拦截 Talk、Green Town、Jual、泰语昵称等假阳性；同时保留 V5.4.0 的人工复核表对齐、游戏名屏蔽、ID 误判保护、断点保存与锁屏强制关机能力。
+name: fb-group-monitor-v5.6.0
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.6.0 增加多语种 GeoNames 停用词、上下文受限地名、整 token 游戏词清理、多词地名不降级、危险 ISO 代码保护与本地地区别名；同时保留 About/语言优先、人工复核表对齐、百分比格式、断点保存和锁屏强制关机。
 ---
 
-# Facebook Group Monitor V5.5.0
+# Facebook Group Monitor V5.6.0
 
+
+
+## V5.6.0 GeoNames 多语种安全过滤与地名抽取
+
+- 对英语、泰语、越南语、印尼语/马来语、西语、葡语、法语、中文和阿语增加交易、社区、邀请、活动等硬停用词。
+- `Bay / Santa / Victoria / Georgia / Phoenix / Orange / Classic / Beta / Mania / League / Latham` 等只可在有行政区或国家上下文的完整短语中使用，不得单独查询。
+- 游戏名、别名或 IP 词根若融合在一个 token 中，整 token 丢弃；禁止从 `PokeMonedas`、`Pok'emon` 等产生 `edas / Pok` 残词。
+- 多词地名保留完整短语；`San Diego / El Paso / San Antonio / Fort Worth` 不再降级为 `Diego / Paso / Antonio / Worth`。
+- 群名单 token GeoNames 结果必须是精确名称，且为国家/ADM1/首府等高层级实体，或人口不少于 50,000。
+- `ID / MY / DE / TR / TM / IT / IN / NO / TO / ME / LA / AT / IS / BE` 等高风险短代码不再孤立判区。
+- 新增 `Hàn Quốc -> KR`、`LATHAM -> LATAM`、`GDL -> LATAM`、`SEQ + Brisbane -> Oceania`、`Arab(s) -> Middle East` 等本地规则。
+- GeoNames 缓存 key 使用 `geonames-v5.6`。
 
 ## V5.5.0 地区判定与 GeoNames 上下文约束
 

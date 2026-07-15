@@ -1,46 +1,19 @@
-# V5.5.0 补丁说明：GeoNames 上下文校验与地区优先级
+# V5.6.0 补丁说明：GeoNames 多语种停用词与地名抽取安全升级
 
-## 修复的问题
+## 核心修改
 
-V5.3/V5.4 中，群名模糊 GeoNames 位于语言和 About 所在地之前，导致普通词被真实地名“碰撞”后直接写入错误地区，例如：
-
-- `Talk -> Town Talk, California`；
-- `GREEN-TOWN -> Green Town, Punjab`；
-- `วิน -> Winnipeg`；
-- `jual -> Kampung Telok Jual, Perak`；
-- `Ovenbreak / Classic` 等游戏系列词被当作地名。
-
-## V5.5.0 修改
-
-1. **地区优先级重排**
-   - 群名明确地区；
-   - About Location 本地规则；
-   - About Location GeoNames；
-   - 高确定性语言映射；
-   - 群名 GeoNames 最后兜底。
-
-2. **群名 GeoNames 精确名称约束**
-   - query 必须与 GeoNames 主名称或 alternate name 完全一致；
-   - 包含式/前缀式结果改为 `rejected_context_mismatch`；
-   - About Location 查询不受该精确限制。
-
-3. **多语言非地点词清洗**
-   - 泰语：购买、出售、交换、讨论、账号、代码等；
-   - 印尼语/马来语：`jual`、`beli`、`akun`、`pecinta`、`kuning` 等；
-   - 英语/品牌：`Talk&Trade`、`GREEN-TOWN`、`Ovenbreak & Classic` 等；
-   - 孤立非拉丁文字 token 不作为群名地点候选。
-
-4. **游戏实体屏蔽扩大**
-   - GeoNames 屏蔽集合包含本批次所有游戏名称、aliases、兄弟标题、IP roots 和受控变体；
-   - 语言识别也屏蔽当前目标及兄弟标题。
-
-5. **缓存和审计**
-   - 缓存 namespace 升级为 `geonames-v5.5`；
-   - 新增 `external_geocoder_rejected_context`；
-   - 保留现有 `__geocoder_attempted_queries` 和错误原因。
+1. 扩充英语、泰语、越南语、印尼语/马来语、西语、葡语、法语、中文和阿语停用词。
+2. 新增上下文受限地名：普通词/品牌词不得孤立查询，带行政区或国家上下文的完整短语仍可使用。
+3. 游戏名称融合 token 整体丢弃，避免 `PokeMonedas -> edas`、`Pok'emon -> Pok`。
+4. 多词地名不再降级为任意单词；保留 `San Diego / El Paso / San Antonio / Fort Worth`。
+5. 群名单 token 结果增加行政层级/人口门槛，默认人口下限 50,000。
+6. 屏蔽高风险孤立 ISO 代码：`ID / IN / IT / NO / TO / ME / MY / LA / DE / TR / TM / AT / IS / BE`。
+7. 新增 `Hàn Quốc / LATHAM / GDL / SEQ+Brisbane / Arab(s)` 等本地别名。
+8. `Georgia` 单独出现不再直接判为欧洲。
+9. 缓存升级为 `geonames-v5.6`。
+10. 新增统计 `external_geocoder_context_restricted_queries`。
 
 ## 兼容性
 
-- 无新增 npm 依赖；
-- 保留 V5.4.0 的 detail/manual_review 列结构；
-- 保留 K/L `0.00%`、后台运行、断点恢复和强制关机。
+- 基于 V5.5.0 累计升级，保留 V5.4.0 人工复核表对齐、K/L 百分比格式、断点恢复、GeoNames 自动启用和锁屏强制关机。
+- 不新增 npm 依赖。

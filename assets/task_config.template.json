@@ -85,7 +85,9 @@
       "kr",
       "south korea",
       "korean",
-      "한국"
+      "한국",
+      "hàn quốc",
+      "han quoc"
     ],
     "KP": [
       "kp",
@@ -172,7 +174,12 @@
       "middle east",
       "mena",
       "gcc",
-      "arabic"
+      "arabic",
+      "arab",
+      "arabs",
+      "العرب",
+      "عرب",
+      "العربية"
     ],
     "Central Asia": [
       "kazakhstan",
@@ -296,7 +303,6 @@
       "austria",
       "greece",
       "ukraine",
-      "georgia",
       "armenia",
       "azerbaijan",
       "cyprus",
@@ -312,7 +318,9 @@
       "cz/sk",
       "danmark",
       "sverige",
-      "schweiz"
+      "schweiz",
+      "georgia country",
+      "საქართველო"
     ],
     "Oceania": [
       "australia",
@@ -519,7 +527,9 @@
       "lima",
       "cdmx",
       "ciudad de mexico",
-      "ciudad de méxico"
+      "ciudad de méxico",
+      "gdl",
+      "guadalajara"
     ],
     "BR": [
       "sao paulo",
@@ -558,7 +568,9 @@
       "sydney",
       "melbourne",
       "auckland",
-      "wellington"
+      "wellington",
+      "south east queensland",
+      "brisbane"
     ],
     "PL": [
       "trójmiasto",
@@ -582,6 +594,7 @@
     "timeout_ms": 8000,
     "rate_limit_ms": 1200,
     "cache_file": "runs/geocode_cache.json",
-    "endpoint": "http://api.geonames.org/searchJSON"
+    "endpoint": "http://api.geonames.org/searchJSON",
+    "group_name_single_token_min_population": 50000
   }
 }

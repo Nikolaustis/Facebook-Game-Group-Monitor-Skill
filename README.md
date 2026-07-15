@@ -1,5 +1,17 @@
-# FB Game Group Monitor Skill V5.5.0
+# FB Game Group Monitor Skill V5.6.0
 
+
+
+## V5.6.0 GeoNames 多语种停用词、上下文限制与抽取修复
+
+- 扩充英语、泰语、越南语、印尼语/马来语、西语、葡语、法语、中文、阿语的非地点停用词；`mua bán / jual beli / ซื้อขาย / بيع وشراء / comunidad / amis` 等不再进入 GeoNames。
+- 对可能是真实地点、也可能是普通词或品牌名的词采用上下文限制：`Orange County / Victoria BC / Santa Rosa` 可查询，孤立 `Orange / Victoria / Santa` 不查询。
+- 删除游戏实体时按完整 token 丢弃，避免 `PokeMonedas -> edas`、`Pok'emon -> Pok`。
+- 地名候选不再从多词短语逐级拆成普通单词；保留 `San Diego / El Paso / San Antonio / Fort Worth`。
+- 单 token 群名地名需满足 GeoNames 精确名称，并为高层级行政实体/首府，或人口不少于 `50,000`。
+- 高风险 ISO 短代码不再孤立判区；`™` 不能产生 `TM`，`de` 不能产生德国，`TR` 不能命中 `Trójmiasto`。
+- 本地新增 `Hàn Quốc`、`LATHAM`、`GDL`、`SEQ + Brisbane`、`Arab(s)` 等别名规则。
+- 缓存 namespace 升级为 `geonames-v5.6`。覆盖后应删除旧 `*geocode*cache*.json`。
 
 ## V5.5.0 GeoNames 上下文校验与地区优先级
 
@@ -97,7 +109,7 @@ Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Forc
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V5.5.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.5.0 同时保留此前对蒙古语误判为俄语的修复。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V5.6.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.6.0 同时保留此前对蒙古语误判为俄语的修复。
 
 
 ## GeoNames 外部地理解析兜底
