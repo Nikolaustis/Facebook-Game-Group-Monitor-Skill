@@ -1,7 +1,7 @@
 {
-  "name": "fb-group-monitor-skill-v5-3-0",
-  "version": "5.3.0",
-  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with game-title exclusion for GeoNames and language detection, percentage-formatted activity/growth columns, About-location adjudication, threshold-gated manual review, precision-guarded GeoNames fallback, Mongolian-vs-Russian recognition, autosave, and lock-screen-safe forced shutdown watching",
+  "name": "fb-group-monitor-skill-v5-4-0",
+  "version": "5.5.0",
+  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with detail-aligned manual-review XLSX columns, game-title exclusion for GeoNames and language detection, percentage-formatted activity/growth columns, About-location adjudication, threshold-gated manual review, precision-guarded GeoNames fallback, Mongolian-vs-Russian recognition, autosave, and lock-screen-safe forced shutdown watching",
   "private": true,
   "scripts": {
     "login": "powershell -ExecutionPolicy Bypass -File .\\scripts\\open_chrome_9222.ps1",

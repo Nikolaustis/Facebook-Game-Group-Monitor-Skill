@@ -1279,6 +1279,7 @@ const GEOCODER_GROUP_NAME_STOPWORDS = new Set([
   'game','games','gaming','mobile','online','roblox','facebook','fb','go','new','old','main','backup','real','all','only','and','the','in','of','a','an','america','asia',
   'event','events','chat','discussion','discussions','remote','raid','raids','raiding','invite','invites','daily','level','trusted','store','stores','hosting','fest','promo','promos','unlimited',
   'add','here','come','together','goers','area','arena','bay','network','club','clubs','admin','admins','season','wide','free','rare','home','regional','only','more','ladies',
+  'talk','town','green','classic','ovenbreak','cookie','cookierun','kingdom','rangers','linerangers','line','idle',
   'state','province','county','city','region','surroundings','alrededores','alentours','solo','intercambios','et','triangle',
   'spam','spam-free','family','friendly','communitytcg',
   'san','santa','santo','saint','st','fort','new','north','south','east','west','puerto','beach',
@@ -1291,6 +1292,9 @@ const GEOCODER_GROUP_NAME_STOPWORDS = new Set([
 
   // Portuguese.
   'do','da','dos','das','e','amizade','amizades','troca','trocas','venda','vendas','conta','contas','jogadores','comunidade','ajuda','ajudas',
+
+  // Indonesian / Malay commerce and community terms. These are semantic functions, not places.
+  'jual','beli','akun','akaun','pecinta','kuning','komunitas','komuniti','kumpulan','pemain','diskusi','resmi','tukar','barter','pasar','murah','trusted',
 
   // French.
   'du','des','le','les','groupe','groupes','officiel','officielle','ami','amis','joueurs','communaute','echange','echanges','échange','échanges',
@@ -1309,6 +1313,7 @@ const GEOCODER_GROUP_NAME_STOPWORDS = new Set([
 const GEOCODER_GENERIC_QUERY_PHRASES = new Set([
   'bay area','remote raid','remote raids','raid invites','friend codes','friends codes','trusted store',
   'come together','world wide','buy sell','compra venta','trocas vendas','add friends','level raid invites',
+  'green town','talk trade','talk and trade','jual beli','buy and sell','ovenbreak classic',
 ]);
 
 // Stopwords in this set may legitimately be part of a place name. Preserve a full segment
@@ -1324,6 +1329,17 @@ const GEOCODER_CJK_NOISE_FRAGMENTS = [
   '精靈寶可夢','精灵宝可梦','寶可夢','宝可梦','神奇寶貝','神奇宝贝','口袋妖怪',
   '討論區','讨论区','交流群','交流區','交流区','交流群組','交流群组','群組','群组','社團','社团',
   '限定','玩家','粉絲','粉丝','朋友','交換','交换','遊戲','游戏','官方','專屬','专属','專區','专区','買賣專區','买卖专区','資訊','资讯','詢問','询问','第二群組','第二群组',
+];
+
+// V5.5: remove high-frequency commerce/community fragments before GeoNames candidate
+// generation. These fragments routinely form valid words but are not geographic evidence.
+const GEOCODER_MULTILINGUAL_NOISE_FRAGMENTS = [
+  // Thai. Long fragments come first so concatenated commerce phrases are removed cleanly.
+  'ศูนย์รวมซื้อขายไอดี','ซื้อขายแลกเปลี่ยน','ซื้อขายพูดคุย','ซื้อขายรหัส','ศูนย์รวม','แลกเปลี่ยน','พูดคุย','ซื้อขาย','ไอดี','รหัส','ซื้อ','ขาย',
+  // Indonesian / Malay.
+  'jual/beli','jual beli','pecinta akun','akun kuning','jual','beli','akun','akaun','pecinta','kuning','komunitas','komuniti','kumpulan','pemain','diskusi','tukar','barter',
+  // Common English brand/community suffixes that are not locations by themselves.
+  'talk&trade','talk and trade','buy and sell','green-town','green town','ovenbreak & classic','ovenbreak classic',
 ];
 
 function containsNonLatinScript(text) {
@@ -1369,6 +1385,12 @@ function geocoderQuerySafety(q, source = 'group_name') {
     }
   }
   if (GEOCODER_GENERIC_QUERY_PHRASES.has(norm)) return { unsafe: true, reason: 'generic_phrase' };
+  if (words.length === 1 && containsNonLatinScript(norm)) {
+    return { unsafe: true, reason: 'non_latin_single_token_not_location' };
+  }
+  if (/^(?:green|happy|fun|best|official|trusted)\s+town$/i.test(norm)) {
+    return { unsafe: true, reason: 'brand_style_town_phrase' };
+  }
   if (words.every((w) => GEOCODER_GROUP_NAME_STOPWORDS.has(w))) return { unsafe: true, reason: 'generic_group_terms_only' };
   if (words.length === 1) {
     const w = words[0];
@@ -1401,6 +1423,15 @@ function removeKnownTitleWords(words, titles) {
 function stripCjkGroupNoise(text) {
   let out = String(text || '');
   for (const fragment of GEOCODER_CJK_NOISE_FRAGMENTS) out = out.split(fragment).join(' ');
+  return clean(out);
+}
+
+function stripMultilingualGroupNoise(text) {
+  let out = stripCjkGroupNoise(text);
+  for (const fragment of GEOCODER_MULTILINGUAL_NOISE_FRAGMENTS) {
+    const pattern = new RegExp(escapeRegExp(fragment), 'giu');
+    out = out.replace(pattern, ' ');
+  }
   return clean(out);
 }
 
@@ -1449,7 +1480,7 @@ function extractGeocoderQueriesFromGroupName(groupName, gameTitlePhrases, maxQue
   // a later small place named Hendo.
   const rawSegments = withoutTranslation.split(/[|/\\•·:;()[\]{}<>，。！？、「」『』【】《》〈〉&]+/g);
   for (const segment of rawSegments) {
-    const cjkCleaned = stripCjkGroupNoise(segment);
+    const cjkCleaned = stripMultilingualGroupNoise(segment);
     const titleOnlyWords = titleOnlyGeocoderWords(cjkCleaned, titles);
     const segmentStopwords = titleOnlyWords.filter((w) => GEOCODER_GROUP_NAME_STOPWORDS.has(w));
     const segmentHasPlaceWord = titleOnlyWords.some((w) => !GEOCODER_GROUP_NAME_STOPWORDS.has(w));
@@ -1462,7 +1493,7 @@ function extractGeocoderQueriesFromGroupName(groupName, gameTitlePhrases, maxQue
 
     // CJK group names do not have spaces. After removing game/community noise, the remaining
     // compact fragment is often the city/province itself (台中, 台南, 新竹, ...).
-    const cjkResidual = stripCjkGroupNoise(segment)
+    const cjkResidual = stripMultilingualGroupNoise(segment)
       .replace(/[A-Za-z0-9\s_-]+/g, ' ')
       .replace(/[^\p{Script=Han}]+/gu, ' ')
       .replace(/\s+/g, ' ')
@@ -1472,7 +1503,7 @@ function extractGeocoderQueriesFromGroupName(groupName, gameTitlePhrases, maxQue
     }
   }
 
-  const allWords = cleanGeocoderWords(stripCjkGroupNoise(withoutTranslation), titles);
+  const allWords = cleanGeocoderWords(stripMultilingualGroupNoise(withoutTranslation), titles);
   if (allWords.length) pushSafeGeocoderCandidate(candidates, allWords.join(' '));
 
   // Prefer meaningful multiword windows before single tokens.
@@ -1637,6 +1668,18 @@ function featureRank(row) {
   return 0;
 }
 
+function geonamesNameMatchType(query, row) {
+  const q = normalizeGeocoderQuery(query);
+  const names = unique([row.name, row.toponymName]
+    .concat(Array.isArray(row.alternateNames) ? row.alternateNames : [])
+    .map((x) => normalizeGeocoderQuery(x))
+    .filter(Boolean));
+  if (names.some((n) => n === q)) return 'exact';
+  if (names.some((n) => n.startsWith(`${q} `) || q.startsWith(`${n} `))) return 'prefix';
+  if (names.some((n) => n.includes(q) || q.includes(n))) return 'contains';
+  return 'weak';
+}
+
 function geonamesConfidence(query, row, rankIndex = 0) {
   const q = normalizeGeocoderQuery(query);
   const names = [row.name, row.toponymName, row.asciiName]
@@ -1698,6 +1741,7 @@ function evaluateGeonamesResults(query, response, minConfidence, ambiguityMargin
       country_code: clean(row.countryCode).toUpperCase(),
       region: regionFromCountryCode(row.countryCode),
       confidence: geonamesConfidence(query, row, idx),
+      name_match_type: geonamesNameMatchType(query, row),
     }))
     .filter((x) => x.region && x.confidence >= Math.max(0, minConfidence - 0.12))
     .sort((a, b) => b.confidence - a.confidence);
@@ -1712,6 +1756,7 @@ function evaluateGeonamesResults(query, response, minConfidence, ambiguityMargin
       country_code: top.country_code,
       place_name: clean(top.row.name || top.row.toponymName || ''),
       endpoint: response.endpoint || '',
+      name_match_type: top.name_match_type || '',
     };
   }
   const conflicting = candidates.find((x) => isMaterialGeoConflict(top, x, ambiguityMargin));
@@ -1725,6 +1770,7 @@ function evaluateGeonamesResults(query, response, minConfidence, ambiguityMargin
       conflict_country_code: conflicting.country_code,
       conflict_place_name: clean(conflicting.row.name || conflicting.row.toponymName || ''),
       endpoint: response.endpoint || '',
+      name_match_type: top.name_match_type || '',
     };
   }
   return {
@@ -1738,6 +1784,7 @@ function evaluateGeonamesResults(query, response, minConfidence, ambiguityMargin
     feature_class: clean(top.row.fcl || ''),
     confidence: top.confidence,
     geoname_id: top.row.geonameId || '',
+    name_match_type: top.name_match_type || '',
     endpoint: response.endpoint || '',
   };
 }
@@ -1761,7 +1808,7 @@ async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
   const endpointKey = normalizeGeonamesEndpoint(externalGeocoder.endpoint);
   // V5.3 cache namespace invalidates earlier accepted false positives and separates the
   // stricter group-name evaluation from explicit About > Location lookups.
-  const cacheKey = `geonames-v5.3|${endpointKey}|${source}|${normalizedQuery}`;
+  const cacheKey = `geonames-v5.5|${endpointKey}|${source}|${normalizedQuery}`;
   const cached = cache ? cache.get(cacheKey) : null;
   if (cached) {
     if (stats) stats.external_geocoder_cache_hits = (stats.external_geocoder_cache_hits || 0) + 1;
@@ -1769,7 +1816,19 @@ async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
   }
   if (stats) stats.external_geocoder_requests = (stats.external_geocoder_requests || 0) + 1;
   const response = await geonamesRequest(normalizedQuery, username, externalGeocoder.max_rows, externalGeocoder.timeout_ms, externalGeocoder.endpoint);
-  const evaluated = evaluateGeonamesResults(normalizedQuery, response, externalGeocoder.min_confidence, externalGeocoder.ambiguity_margin);
+  let evaluated = evaluateGeonamesResults(normalizedQuery, response, externalGeocoder.min_confidence, externalGeocoder.ambiguity_margin);
+  // V5.5: a group-name query is fuzzy context, unlike an explicit About > Location value.
+  // Accept it only when GeoNames confirms the queried phrase as an exact primary/alternate
+  // place name. This rejects jual -> Kampung Telok Jual, talk -> Town Talk and วิน -> Winnipeg.
+  if (source === 'group_name' && evaluated.status === 'accepted' && evaluated.name_match_type !== 'exact') {
+    evaluated = {
+      ...evaluated,
+      status: 'rejected_context_mismatch',
+      reason: `group_name_requires_exact_place_name:${evaluated.name_match_type || 'weak'}`,
+      region: '',
+    };
+    if (stats) stats.external_geocoder_rejected_context = (stats.external_geocoder_rejected_context || 0) + 1;
+  }
   const out = { ...evaluated, provider: 'geonames', source, query: normalizedQuery };
   if (cache && !['unsafe_query', 'network_error', 'timeout', 'geonames_account_not_enabled', 'geonames_username_error', 'geonames_http_error', 'geonames_endpoint_error', 'parse_error'].includes(out.status)) cache.set(cacheKey, out);
   await sleepMs(externalGeocoder.rate_limit_ms);
@@ -1830,7 +1889,7 @@ async function runExternalGeocoderFallback({
     }
     if (['geonames_api_error', 'geonames_account_not_enabled', 'geonames_username_error', 'geonames_http_error', 'geonames_endpoint_error', 'network_error', 'timeout', 'parse_error'].includes(result.status)) {
       if (stats) stats.external_geocoder_errors = (stats.external_geocoder_errors || 0) + 1;
-    } else if (result.status === 'no_result' || result.status === 'low_confidence') {
+    } else if (result.status === 'no_result' || result.status === 'low_confidence' || result.status === 'rejected_context_mismatch') {
       if (stats) stats.external_geocoder_no_result = (stats.external_geocoder_no_result || 0) + 1;
     }
   }
@@ -1901,11 +1960,8 @@ async function resolveRegionV5({
   const groupNameMatch = detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords, aboutLocationCityKeywords);
   const groupNameHasMultipleRegions = hasMultipleRegionEvidence(groupNameMatch);
 
-  // V5.2.2: multiple distinct geographic signals in the group name are not allowed to
-  // collapse immediately to a broad business region. About > Location is already fetched
-  // for phase 2, so use its explicit location (or GeoNames result) to adjudicate first.
-  // Example: TH + ID with Bangkok in About resolves to TH. If About cannot adjudicate,
-  // same-business evidence may fall back to its broad bucket; cross-business conflict stays blank.
+  // Explicit group-name geography remains the strongest evidence. When multiple distinct
+  // regions are present, About > Location must adjudicate before any broad-region fallback.
   if (groupNameHasMultipleRegions) {
     const aboutLocationMatch = detectRegionByAboutLocation(
       normalizedLocation,
@@ -1983,46 +2039,10 @@ async function resolveRegionV5({
     };
   }
 
-  // V5: when group name contains a finer-grained place but no country/region keyword,
-  // verify it with GeoNames before falling back to language. If the group name already has
-  // explicit cross-region keyword conflict, do not let a fuzzy group-name query override it;
-  // a clear About > Location value may still resolve the conflict later.
-  const geoGroup = groupNameMatch.source === 'keyword_conflict'
-    ? { status: 'skipped_keyword_conflict' }
-    : await runExternalGeocoderFallback({
-      groupName,
-      aboutLocationText: '',
-      gameTitlePhrases,
-      externalGeocoder,
-      geocodeCache,
-      stats,
-      preferredSources: ['group_name'],
-    });
-  if (geoGroup.status === 'accepted' && geoGroup.region) {
-    return {
-      region: normalizeRegionOutput(geoGroup.region),
-      source: 'external_geocoder_group_name',
-      group_name_match: groupNameMatch,
-      about_location_match: { region: '', source: '', keyword_hits: [] },
-      about_location: normalizedLocation,
-      used_about_location: false,
-      external_geocoder: geoGroup,
-    };
-  }
-
-  const existingRegion = mapRegion(languageSignal, languageToRegion, groupNameMatch);
-  if (existingRegion) {
-    return {
-      region: existingRegion,
-      source: groupNameMatch.source || 'language_map',
-      group_name_match: groupNameMatch,
-      about_location_match: { region: '', source: '', keyword_hits: [] },
-      about_location: normalizedLocation,
-      used_about_location: false,
-      external_geocoder: geoGroup.status && geoGroup.status !== 'disabled' && geoGroup.status !== 'no_candidate_query' ? geoGroup : { status: 'not_needed' },
-    };
-  }
-
+  // V5.5 priority for otherwise unresolved groups:
+  // explicit About location (local rules -> GeoNames), then high-confidence language, and
+  // only then fuzzy group-name GeoNames. This prevents a generic group-name word from
+  // outranking Bangkok/Simla in About or Thai/Indonesian player-language evidence.
   const aboutLocationMatch = detectRegionByAboutLocation(
     normalizedLocation,
     countryRegionKeywords,
@@ -2037,12 +2057,10 @@ async function resolveRegionV5({
       about_location_match: aboutLocationMatch,
       about_location: normalizedLocation,
       used_about_location: true,
-      external_geocoder: geoGroup.status && geoGroup.status !== 'disabled' && geoGroup.status !== 'no_candidate_query' ? geoGroup : { status: 'not_needed' },
+      external_geocoder: { status: 'not_needed' },
     };
   }
 
-  // V5: if About > Location contains a city/province/state not covered by the small local
-  // city table, verify it with GeoNames as the final region fallback.
   const geoAbout = await runExternalGeocoderFallback({
     groupName: '',
     aboutLocationText: normalizedLocation,
@@ -2064,9 +2082,47 @@ async function resolveRegionV5({
     };
   }
 
-  const external_geocoder = geoAbout.status && geoAbout.status !== 'disabled' && geoAbout.status !== 'no_candidate_query'
-    ? geoAbout
-    : (geoGroup.status && geoGroup.status !== 'disabled' && geoGroup.status !== 'no_candidate_query' ? geoGroup : { status: geoAbout.status || geoGroup.status || '' });
+  const languageRegion = mapRegion(languageSignal, languageToRegion, groupNameMatch);
+  if (languageRegion) {
+    return {
+      region: languageRegion,
+      source: 'language_map_before_group_name_geocoder',
+      group_name_match: groupNameMatch,
+      about_location_match: aboutLocationMatch,
+      about_location: normalizedLocation,
+      used_about_location: false,
+      external_geocoder: geoAbout.status && !['disabled', 'no_candidate_query'].includes(geoAbout.status)
+        ? geoAbout
+        : { status: 'not_needed' },
+    };
+  }
+
+  const geoGroup = groupNameMatch.source === 'keyword_conflict'
+    ? { status: 'skipped_keyword_conflict' }
+    : await runExternalGeocoderFallback({
+      groupName,
+      aboutLocationText: '',
+      gameTitlePhrases,
+      externalGeocoder,
+      geocodeCache,
+      stats,
+      preferredSources: ['group_name'],
+    });
+  if (geoGroup.status === 'accepted' && geoGroup.region) {
+    return {
+      region: normalizeRegionOutput(geoGroup.region),
+      source: 'external_geocoder_group_name_last_fallback',
+      group_name_match: groupNameMatch,
+      about_location_match: aboutLocationMatch,
+      about_location: normalizedLocation,
+      used_about_location: false,
+      external_geocoder: geoGroup,
+    };
+  }
+
+  const external_geocoder = geoGroup.status && !['disabled', 'no_candidate_query'].includes(geoGroup.status)
+    ? geoGroup
+    : (geoAbout.status && !['disabled', 'no_candidate_query'].includes(geoAbout.status) ? geoAbout : { status: geoGroup.status || geoAbout.status || '' });
   return {
     region: '',
     source: external_geocoder.status === 'ambiguous' ? 'external_geocoder_ambiguous' : (aboutLocationMatch.source || groupNameMatch.source || ''),
@@ -2631,7 +2687,7 @@ async function extractAboutLocationFromPage(page) {
     const add = (value) => {
       let v = normalize(value);
       if (!v || v.length < 2 || v.length > 180) return;
-      v = v.replace(/^(?:location|group location|location of this group|based in|located in|位置|地点|地點|所在地|群组位置|群組位置|小组位置|小組位置|这个小组的位置|這個小組的位置|ubicaci[oó]n|localizaci[oó]n|localizaç[aã]o|lieu|emplacement|standort|ort|posizione|localit[aà]|locatie|konum|lokasi|lokasyon|v[ịi] tr[ií]|đ[ịi]a đi[ểe]m|สถานที่|場所|위치|местоположение|расположение|الموقع|مکان)\s*[:：·•|｜\-–—]?\s*/iu, '').trim();
+      v = v.replace(/^(?:location|group location|location of this group|based in|located in|位置|地点|地點|所在地|群组位置|群組位置|小组位置|小組位置|这个小组的位置|這個小組的位置|ubicaci[oó]n|localizaci[oó]n|localizaç[aã]o|lieu|emplacement|standort|ort|posizione|localit[aà]|locatie|konum|lokasi|lokasyon|v[ịi] tr[ií]|đ[ịi]a đi[ểe]m|ตำแหน่งที่ตั้ง|สถานที่|場所|위치|местоположение|расположение|الموقع|مکان)\s*[:：·•|｜\-–—]?\s*/iu, '').trim();
       const k = key(v);
       if (!v || blocked.has(k)) return;
       if (/^(?:not available|unknown|n\/a|none|暂无|無|未知)$/iu.test(v)) return;
@@ -2893,6 +2949,27 @@ function normalizeSnapshotDate(value, fallback) {
   return clean(fallback) || new Date().toISOString().slice(0, 10);
 }
 
+function normalizeManualReviewOutputRow(row, formulaFields) {
+  return {
+    ...row,
+    snapshot_date: row.snapshot_date || '',
+    region: row.region || '',
+    language: row.language || row.language_signal || '',
+    game_name: row.game_name || '',
+    group_name: row.group_name || '',
+    group_url: row.group_url || '',
+    group_id: String(row.group_id || getGroupId(row.group_url || '')),
+    group_size: row.group_size ?? '',
+    today_posts: row.today_posts ?? '',
+    week_new_fans: row.week_new_fans ?? '',
+    [formulaFields.activeIndex]: '',
+    [formulaFields.growthRate]: '',
+    __region_location: row.__region_location || row.about_location || '',
+    language_signal: row.language_signal || row.language || '',
+    about_location: row.about_location || row.__region_location || '',
+  };
+}
+
 function buildDetailSheet(rows, fields, formulaFields) {
   const aoa = [fields];
   rows.forEach((row, idx) => {
@@ -2946,6 +3023,8 @@ function buildDetailSheet(rows, fields, formulaFields) {
     if (field === 'group_url') return { wch: 48 };
     if (field === 'group_id') return { wch: 22, z: '@' };
     if (field === formulaFields.activeIndex || field === formulaFields.growthRate) return { wch: 18, z: '0.00%' };
+    if (field === 'review_reason' || field === 'variant_threshold_applied') return { wch: 36 };
+    if (field === 'source_query') return { wch: 28 };
     return { wch: 18 };
   });
   return ws;
@@ -3215,6 +3294,16 @@ function resolveCollisions(rows) {
     );
   }
 
+  const globalGameEntityMaskPhrases = unique([
+    ...allGameNames,
+    ...Array.from(profiles.values()).flatMap((profile) => [
+      ...((profile && profile.rawPhrases) || []),
+      ...((profile && profile.siblingRawPhrases) || []),
+      ...((profile && profile.ipRootRawPhrases) || []),
+      ...((profile && profile.configuredTitleVariants) || []).map((item) => clean(item && item.query)),
+    ]),
+  ]);
+
   const browser = await chromium.connectOverCDP(args.cdp || config.cdp_url || 'http://127.0.0.1:9222');
   const context = browser.contexts()[0] || (await browser.newContext());
   const page = context.pages().find((p) => p.url().includes('facebook.com')) || (await context.newPage());
@@ -3269,6 +3358,7 @@ function resolveCollisions(rows) {
       external_geocoder_no_result: 0,
       external_geocoder_errors: 0,
       external_geocoder_filtered_queries: 0,
+      external_geocoder_rejected_context: 0,
       game_breakdown: {},
     };
     const formulaFields = {
@@ -3309,6 +3399,19 @@ function resolveCollisions(rows) {
       '__geocoder_admin1',
       '__geocoder_confidence',
     ];
+    const manualReviewExtraFields = [
+      'language_signal',
+      'about_location',
+      'match_type',
+      'matched_phrase',
+      'negative_hit',
+      'review_reason',
+      'source_query',
+      'query_variant_type',
+      'source_is_seed_url',
+      'variant_threshold_applied',
+    ];
+    const manualReviewFields = [...fields, ...manualReviewExtraFields];
     let currentGameName = '';
     let currentGameIndex = -1;
     let currentCandidateIndex = -1;
@@ -3484,10 +3587,13 @@ function resolveCollisions(rows) {
       currentGameName = gameName;
       currentGameIndex = gameIdx + 1;
       const profile = profiles.get(gameName);
-      const languageTitlePhrases = buildCurrentGameTitleMaskPhrases(profile);
+      const languageTitlePhrases = unique([
+        ...buildCurrentGameTitleMaskPhrases(profile),
+        ...((profile && profile.siblingRawPhrases) || []),
+      ]);
       const geocoderExcludedTitlePhrases = unique([
+        ...globalGameEntityMaskPhrases,
         ...languageTitlePhrases,
-        ...allGameNames,
       ]);
       const candidates = JSON.parse(fs.readFileSync(g.candidates_file, 'utf8'));
       currentCandidateTotal = candidates.length;
@@ -3649,16 +3755,12 @@ function resolveCollisions(rows) {
           }
 
           manualReviewRows.push({
-            snapshot_date: row.snapshot_date,
-            game_name: row.game_name,
-            group_name: row.group_name,
-            group_url: row.group_url,
-            group_size: row.group_size,
-            today_posts: row.today_posts,
-            week_new_fans: row.week_new_fans,
-            language_signal: row.language_signal,
-            region: row.region,
-            about_location: row.__region_location,
+            ...row,
+            language: row.language_signal || '',
+            [formulaFields.activeIndex]: '',
+            [formulaFields.growthRate]: '',
+            language_signal: row.language_signal || '',
+            about_location: row.__region_location || '',
             match_type: match.type,
             matched_phrase: match.phrase || '',
             negative_hit: match.negative_hit || '',
@@ -3792,31 +3894,13 @@ function resolveCollisions(rows) {
 
     stats.output_rows = finalRows.length;
 
+    const manualReviewOutputRows = manualReviewRows.map((row) => normalizeManualReviewOutputRow(row, formulaFields));
     const wb = XLSX.utils.book_new();
     const ws = buildDetailSheet(finalRows, fields, formulaFields);
     XLSX.utils.book_append_sheet(wb, ws, 'detail');
     XLSX.utils.book_append_sheet(
       wb,
-      buildPlainSheet(manualReviewRows, [
-        'snapshot_date',
-        'game_name',
-        'group_name',
-        'group_url',
-        'group_size',
-        'today_posts',
-        'week_new_fans',
-        'language_signal',
-        'region',
-        'about_location',
-        'match_type',
-        'matched_phrase',
-        'negative_hit',
-        'review_reason',
-        'source_query',
-        'query_variant_type',
-        'source_is_seed_url',
-        'variant_threshold_applied',
-      ]),
+      buildDetailSheet(manualReviewOutputRows, manualReviewFields, formulaFields),
       'manual_review'
     );
     writeWorkbookAtomic(outXlsx, wb);

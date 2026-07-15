@@ -1,5 +1,24 @@
-# FB Game Group Monitor Skill V5.3.0
+# FB Game Group Monitor Skill V5.5.0
 
+
+## V5.5.0 GeoNames 上下文校验与地区优先级
+
+- 未命中群名明确国家/地区时，地区判断顺序调整为：**About 明确所在地（本地规则 / GeoNames）→ 高确定性语言映射 → 群名模糊 GeoNames**。
+- 泰语、印尼语、马来语等可稳定映射地区的语言证据，不再被群名中的普通词 GeoNames 假阳性覆盖。
+- 群名 GeoNames 仅接受“查询短语与 GeoNames 主名称或别名完全一致”的结果；`talk -> Town Talk`、`jual -> Kampung Telok Jual`、`วิน -> Winnipeg` 等包含式或模糊式结果会拒绝。
+- 新增泰语、印尼语、马来语交易/社群词清洗，并屏蔽 `Talk&Trade`、`GREEN-TOWN`、`Jual/Beli`、`Ovenbreak & Classic` 等非地点语义。
+- 孤立的非拉丁文字 token 不再作为群名地点查询；明确 About Location 不受此限制。
+- GeoNames 缓存命名空间升级为 `geonames-v5.5`，不复用 V5.3/V5.4 产生的 accepted 假阳性。
+- `audit_stats.json` 新增 `external_geocoder_rejected_context`，用于统计因“GeoNames 名称并非精确匹配”而拒绝的结果。
+- 保留 V5.4.0 的 `manual_review` 与 `detail` 对齐格式。
+
+## V5.4.0 人工复核表与 detail 对齐
+
+- `manual_review` 的前 31 列与 `detail` 完全相同，字段名称、顺序、列宽和文本/百分比格式一致。
+- K/L 列同样写入活跃指数与规模增速公式，并使用 `0.00%`。
+- 人工复核专属信息从 AF 列开始依次追加：`language_signal`、`about_location`、`match_type`、`matched_phrase`、`negative_hit`、`review_reason`、`source_query`、`query_variant_type`、`source_is_seed_url`、`variant_threshold_applied`。
+- 因此前 31 列可以直接从 `manual_review` 批量复制并粘贴到 `detail`，不会发生字段错位。
+- 正常最终导出和中断恢复导出均使用同一列结构；恢复旧版 checkpoint 时会自动补齐缺失列。
 
 ## V5.3.0：游戏名隔离与 Excel 百分比格式
 
@@ -78,14 +97,14 @@ Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Forc
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V5.3.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.3.0 同时保留此前对蒙古语误判为俄语的修复。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V5.5.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.5.0 同时保留此前对蒙古语误判为俄语的修复。
 
 
 ## GeoNames 外部地理解析兜底
 
 第二轮地区判断包含 GeoNames 外部验证兜底。它用于处理群组名称或 About/简介中只出现城市、省、州等细粒度地名的情况，例如 `Ulaanbaatar`、`Cebu`、`California` 这类旧版未必能通过固定词典识别的位置。
 
-调用逻辑是兜底式的：如果群名已经有明确国家/地区/大区，仍按原规则输出；只有原有链路无法确定地区时，才从群名和 About Location 中抽取疑似地名，调用 GeoNames 验证。通过验证后，GeoNames 返回的国家代码会映射为 Skill 的 `region`。歧义、低置信度、超时和无结果都不会中断采集。
+调用逻辑是兜底式的：群名明确国家/地区/大区优先；其余情况先验证 About Location，再使用允许的高确定性语言映射，最后才对经过严格清洗的群名地点候选调用 GeoNames。通过验证后，GeoNames 返回的国家代码会映射为 Skill 的 `region`。歧义、低置信度、超时和无结果都不会中断采集。
 
 GeoNames 用户名放在 `config/local/geonames.local.json`，根目录 `.gitignore` 已默认忽略 `config/local/*.json`，该文件不建议上传 GitHub。
 
@@ -102,7 +121,8 @@ GeoNames 用户名放在 `config/local/geonames.local.json`，根目录 `.gitign
 - 语言判断以讨论区前五条可见玩家发言为主，群组名称为辅助。
 - “关于这个小组”只在存在用户手写的非 UI 内容时作为最低优先级兜底。
 - 地区判断优先看群组名称中的明确地区语义；群名同时出现多个不同地区证据时先读取 About 所在地裁决，只有 About 无法裁决时，同一业务大区的多国家/地区组合才回退到该大区。
-- 当群名与允许的语言兜底仍无法确定地区时，读取 About 页中明确标注的“所在地 / Location”字段；国家/地区优先，已配置的高确定性城市次之。
+- 群名没有明确地区时，优先读取 About 页中明确标注的“所在地 / Location”字段；About 本地规则或 GeoNames 均高于语言映射和群名模糊 GeoNames。
+- About 仍无结果时，使用泰语、印尼语等高确定性语言映射；只有语言也无法判定时，才调用群名 GeoNames。
 - Excel 输出固定列顺序，`snapshot_date` 和 `group_id` 强制文本格式，活跃指数/规模增速为百分比公式。
 - 后台启动后会立即返回 PID 与日志路径；第二轮默认每 30 分钟输出一次 `codex_progress_report`，并刷新 `codex_progress_report.json`。
 - 可选“完成后关机”：默认不启用。启用后会在最终报表生成并确认 Chrome 已关闭后，启动独立 Node 监控器；该监控器等待第二轮进程退出、核验结果文件，再执行 `shutdown.exe /s /f /t <秒数>`。
@@ -259,11 +279,11 @@ Excel 格式规则：
 
 地区判断优先级：
 
-1. 群组名称里的明确国家、地区、属地或大区语义。
-2. 若命中多个国家/地区，但都属于同一业务大区，则输出该大区。例如 `MY + SG`、`TH + VN` 输出 `SEA`；`HK + TW` 输出 `EA`；`DE + FR` 输出 `EUR`。
-3. 若命中多个跨业务大区信号，则视为地区冲突并留空。例如 `UAE + PH`、`US + BR`、`JP + TH`。
-4. 未命中群名地区语义时，才使用高确定性语言辅助映射，例如 Thai -> TH、Vietnamese -> VN、Indonesian -> ID、Malay -> MY、Filipino -> PH、Arabic/Persian -> Middle East。
-5. 若前四步仍无法确定，才从 About 页中明确标注的“所在地 / Location”字段推断地区：先识别国家/地区，再识别 `about_location_city_keywords` 中配置的高确定性城市；该兜底不得覆盖前述已得到的地区结果。
+1. 群组名称里的明确国家、地区、属地、大区或本地高确定性城市。
+2. 群名出现多个不同地区证据时，先使用 About 所在地裁决；About 无法裁决后，同一业务大区才回退到 `SEA / EA / EUR`，跨业务大区保持空值。
+3. 群名没有明确地区时，读取 About 页“所在地 / Location”：先本地规则，再调用 About Location GeoNames。
+4. About 无结果时，使用高确定性语言辅助映射，例如 Thai -> TH、Vietnamese -> VN、Indonesian -> ID、Malay -> MY、Filipino -> PH、Arabic/Persian -> Middle East。
+5. 前四步都没有结果时，才调用群名 GeoNames；查询必须已去除所有已知游戏实体和多语言交易/社群词，且返回地名必须精确匹配 query。
 6. 无法确定时留空。
 
 单一国家/地区命中时，东亚与东南亚仍按自身输出；Middle East、Central Asia、South Asia、North America、LATAM、Africa、EUR、Oceania 按业务大区归并；BR 单列；TR、NL、DE、FR、IT、PL、RU 单列。

@@ -128,9 +128,68 @@ function resolveCollisions(rows) {
 }
 
 
-function buildPlainSheet(rows, fields) {
-  const aoa = [fields].concat((rows || []).map((row) => fields.map((field) => row[field] ?? '')));
-  return XLSX.utils.aoa_to_sheet(aoa);
+function getGroupId(groupUrl) {
+  const value = String(groupUrl || '');
+  const match = value.match(/\/groups\/([^/?#]+)/i);
+  return match ? match[1] : '';
+}
+
+function normalizeManualReviewRow(row) {
+  const out = {};
+  for (const field of fields) out[field] = row[field] ?? '';
+  out.snapshot_date = row.snapshot_date ?? '';
+  out.region = row.region ?? '';
+  out.language = row.language ?? row.language_signal ?? '';
+  out.game_name = row.game_name ?? '';
+  out.group_name = row.group_name ?? '';
+  out.group_url = row.group_url ?? '';
+  out.group_id = String(row.group_id || getGroupId(row.group_url));
+  out.group_size = row.group_size ?? '';
+  out.today_posts = row.today_posts ?? '';
+  out.week_new_fans = row.week_new_fans ?? '';
+  out['活跃指数=当日新帖/社群规模'] = '';
+  out['规模增速=上周新增/(社群规模-上周新增）'] = '';
+  out.__region_location = row.__region_location ?? row.about_location ?? '';
+  for (const field of manualReviewExtraFields) out[field] = row[field] ?? '';
+  out.language_signal = row.language_signal ?? out.language;
+  out.about_location = row.about_location ?? out.__region_location;
+  return out;
+}
+
+function buildDetailLikeSheet(rows, fields) {
+  const normalizedRows = (rows || []).map(normalizeManualReviewRow);
+  const aoa = [fields].concat(normalizedRows.map((row) => fields.map((field) => {
+    if (field === '活跃指数=当日新帖/社群规模' || field === '规模增速=上周新增/(社群规模-上周新增）') return '';
+    if (field === 'snapshot_date' || field === 'group_id') return row[field] === undefined || row[field] === null ? '' : String(row[field]);
+    return row[field] ?? '';
+  })));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  normalizedRows.forEach((row, idx) => {
+    const excelRow = idx + 2;
+    const groupSize = Number(row.group_size) || 0;
+    const todayPosts = Number(row.today_posts) || 0;
+    const weekNewFans = Number(row.week_new_fans) || 0;
+    ws[`K${excelRow}`] = { t: 'n', f: `IFERROR(I${excelRow}/H${excelRow},"")`, v: groupSize ? todayPosts / groupSize : 0, z: '0.00%' };
+    ws[`L${excelRow}`] = { t: 'n', f: `IFERROR(J${excelRow}/(H${excelRow}-J${excelRow}),"")`, v: groupSize - weekNewFans ? weekNewFans / (groupSize - weekNewFans) : 0, z: '0.00%' };
+    for (const field of ['snapshot_date', 'group_id']) {
+      const col = fields.indexOf(field);
+      const ref = XLSX.utils.encode_cell({ r: idx + 1, c: col });
+      if (ws[ref]) { ws[ref].t = 's'; ws[ref].z = '@'; }
+    }
+  });
+  ws['!cols'] = fields.map((field) => {
+    if (field === 'snapshot_date') return { wch: 12, z: '@' };
+    if (field === 'region' || field === 'language') return { wch: 14 };
+    if (field === 'game_name') return { wch: 26 };
+    if (field === 'group_name') return { wch: 46 };
+    if (field === 'group_url') return { wch: 48 };
+    if (field === 'group_id') return { wch: 22, z: '@' };
+    if (field === '活跃指数=当日新帖/社群规模' || field === '规模增速=上周新增/(社群规模-上周新增）') return { wch: 18, z: '0.00%' };
+    if (field === 'review_reason' || field === 'variant_threshold_applied') return { wch: 36 };
+    if (field === 'source_query') return { wch: 28 };
+    return { wch: 18 };
+  });
+  return ws;
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -168,7 +227,32 @@ const fields = [
   '__region_source',
   '__region_keyword_hits',
   '__region_location',
+  '__geocoder_provider',
+  '__geocoder_status',
+  '__geocoder_source',
+  '__geocoder_query',
+  '__geocoder_attempted_queries',
+  '__geocoder_endpoint',
+  '__geocoder_error_reason',
+  '__geocoder_country_code',
+  '__geocoder_place_name',
+  '__geocoder_admin1',
+  '__geocoder_confidence',
 ];
+
+const manualReviewExtraFields = [
+  'language_signal',
+  'about_location',
+  'match_type',
+  'matched_phrase',
+  'negative_hit',
+  'review_reason',
+  'source_query',
+  'query_variant_type',
+  'source_is_seed_url',
+  'variant_threshold_applied',
+];
+const manualReviewFields = [...fields, ...manualReviewExtraFields];
 
 let sourceKind = 'partial_xlsx';
 let rawRows = [];
@@ -247,26 +331,7 @@ XLSX.utils.book_append_sheet(wb, ws, 'detail');
 if (checkpoint && Array.isArray(checkpoint.manual_review_rows)) {
   XLSX.utils.book_append_sheet(
     wb,
-    buildPlainSheet(checkpoint.manual_review_rows, [
-      'snapshot_date',
-      'game_name',
-      'group_name',
-      'group_url',
-      'group_size',
-      'today_posts',
-      'week_new_fans',
-      'language_signal',
-      'region',
-      'about_location',
-      'match_type',
-      'matched_phrase',
-      'negative_hit',
-      'review_reason',
-      'source_query',
-      'query_variant_type',
-      'source_is_seed_url',
-      'variant_threshold_applied',
-    ]),
+    buildDetailLikeSheet(checkpoint.manual_review_rows, manualReviewFields),
     'manual_review'
   );
 }

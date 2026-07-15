@@ -1,4 +1,4 @@
 version: 1
-display_name: Facebook Group Monitor V5.3.0
+display_name: Facebook Group Monitor V5.5.0
 short_description: 严格版 Facebook 游戏群组监测技能，支持精确短代码边界、GeoNames 泛词防误判、群名城市/省州识别、自动 GeoNames 兜底、蒙古语/俄语区分、阈值门控人工复核及 XLSX/JSON 审计输出。
-default_prompt: 按 V5.3.0 流程运行 Facebook 群组监测。先执行登录阶段；在用户回复“已登录”前不要搜索、采集、分析或生成报告。第二轮地区判断必须先使用严格本地规则，再对经过安全过滤且已剔除当前游戏名称/别名的疑似地名调用 GeoNames；不得把 de、TM、Come、Gift 等普通词或符号当作地区；人工复核候选必须先通过成员规模与活跃度门槛；孤立 ID 不得解释为印度尼西亚，群名出现多个不同地区证据时必须先用 About 所在地裁决；语言识别前必须剔除当前游戏名称，K/L 指标列必须输出为 0.00% 百分比格式。
+default_prompt: 按 V5.5.0 流程运行 Facebook 群组监测。先执行登录阶段；在用户回复“已登录”前不要搜索、采集、分析或生成报告。第二轮地区判断必须先使用群名明确地区，再使用 About Location、本地/GeoNames 和高确定性语言；只有这些均无结果时，才对经过安全过滤且已剔除全部已知游戏实体词的群名候选调用 GeoNames；群名 GeoNames 必须精确名称匹配；不得把 de、TM、Come、Gift 等普通词或符号当作地区；人工复核候选必须先通过成员规模与活跃度门槛；孤立 ID 不得解释为印度尼西亚，群名出现多个不同地区证据时必须先用 About 所在地裁决；语言识别前必须剔除当前游戏名称，K/L 指标列必须输出为 0.00% 百分比格式；manual_review 的 A:AE 必须与 detail 完全一致，人工复核专属字段从 AF 开始追加。

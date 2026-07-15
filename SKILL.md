@@ -1,10 +1,29 @@
 ---
-name: fb-group-monitor-v5.3.0
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.3.0 在 GeoNames 与语言识别前剔除当前游戏名称及别名，并保证 K/L 指标列以 0.00% 百分比格式输出；同时保留 ID 误判保护、About 地区冲突裁决、阈值门控人工复核、GeoNames 地区精度、蒙古语/俄语区分、断点保存与锁屏强制关机能力。
+name: fb-group-monitor-v5.5.0
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.5.0 将 About 所在地和高确定性语言置于群名模糊 GeoNames 之前，并要求群名 GeoNames 结果为精确地名匹配，系统性拦截 Talk、Green Town、Jual、泰语昵称等假阳性；同时保留 V5.4.0 的人工复核表对齐、游戏名屏蔽、ID 误判保护、断点保存与锁屏强制关机能力。
 ---
 
-# Facebook Group Monitor V5.3.0
+# Facebook Group Monitor V5.5.0
 
+
+## V5.5.0 地区判定与 GeoNames 上下文约束
+
+- 群名中的明确国家、地区、大区或本地高确定性城市仍是最高优先级。
+- 群名无明确地区时，固定顺序为：About Location 本地规则 → About Location GeoNames → 高确定性语言映射 → 群名 GeoNames。
+- `Thai -> TH`、`Indonesian -> ID` 等语言映射不得被普通群名词的 GeoNames 结果覆盖。
+- 群名 GeoNames 只接受 query 与 GeoNames 主名称/alternate name 的精确匹配；前缀或包含式匹配记为 `rejected_context_mismatch`。
+- 泰语交易词、印尼/马来交易词、社群品牌词和游戏系列词必须在 query 生成前去除。
+- 孤立非拉丁文字 token 不允许作为群名 GeoNames 候选；About Location 仍可正常检索。
+- 缓存 key 使用 `geonames-v5.5`；旧缓存不得复用。
+- 统计字段 `external_geocoder_rejected_context` 用于记录上下文拒绝数量。
+
+## V5.4.0 人工复核表与 detail 对齐
+
+- `manual_review` 的前 31 列与 `detail` 完全相同，字段名称、顺序、列宽和文本/百分比格式一致。
+- K/L 列同样写入活跃指数与规模增速公式，并使用 `0.00%`。
+- 人工复核专属信息从 AF 列开始依次追加：`language_signal`、`about_location`、`match_type`、`matched_phrase`、`negative_hit`、`review_reason`、`source_query`、`query_variant_type`、`source_is_seed_url`、`variant_threshold_applied`。
+- 因此前 31 列可以直接从 `manual_review` 批量复制并粘贴到 `detail`，不会发生字段错位。
+- 正常最终导出和中断恢复导出均使用同一列结构；恢复旧版 checkpoint 时会自动补齐缺失列。
 
 ## V5.3.0 游戏名称屏蔽与 XLSX 格式
 
@@ -53,7 +72,7 @@ description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.3.0
 
 第二轮在原有地区判断链路失败时，可以调用 GeoNames 作为外部地理验证兜底。不得把整条群名无条件视为地点；应先去除游戏标题、交易/群组/服务器等泛词，再抽取疑似城市、省或州名。
 
-优先级固定为：群名国家/地区/大区关键词 > 群名细粒度地名的 GeoNames 验证 > 高确定性语言映射 > About Location 本地规则 > About Location 的 GeoNames 验证。已经由高优先级规则得到的地区不得被 GeoNames 覆盖。
+当前优先级固定为：群名明确国家/地区/大区/本地城市 > About Location 本地规则 > About Location GeoNames > 高确定性语言映射 > 群名模糊 GeoNames。已经由更高优先级证据得到的地区不得被群名 GeoNames 覆盖。
 
 GeoNames 凭据必须从 `config/local/geonames.local.json` 或 `GEONAMES_USERNAME` 环境变量读取；不要把用户名写入公开任务配置或文档模板。`config/local/*.json` 已由 `.gitignore` 忽略。
 
@@ -221,9 +240,11 @@ V5.0.1 的 `region` 采用“具体国家/地区/属地识别 -> 业务区域归
 - 如果命中项跨业务大区，则视为 `keyword_conflict` 并留空。例如 `UAE + PH`、`US + BR`、`JP + TH` 不强行归并。
 - 同大区折叠时，`__region_source` 输出 `country_keyword_same_business_region` 或 `region_keyword_same_business_region`，`__region_keyword_hits` 保留原始命中详情。
 
-未命中群名地区语义时，仅允许高确定性语言辅助映射：Thai -> `TH`、Vietnamese -> `VN`、Indonesian -> `ID`、Malay -> `MY`、Filipino -> `PH`、Lao -> `LA`、Khmer -> `KH`、Burmese -> `MM`、Arabic/Persian -> `Middle East`。
+未命中群名明确地区语义时，先读取群组 About 页中明确标注的“所在地 / Location”字段：先用本地国家/地区/城市规则，再调用 About Location GeoNames。About 的明确地点高于语言与群名模糊 GeoNames。
 
-若上述链路仍无法确定地区，才读取群组 About 页中明确标注的“所在地 / Location”字段作为最终兜底：先识别所在地文本中的国家/地区，其次识别已配置的高确定性城市；城市会映射至对应国家或业务大区。该字段不得覆盖已由群名或允许的语言映射得到的结果。`__region_source` 将输出 `about_location_country_keyword`、`about_location_city_keyword` 或 `about_location_region_keyword`，`__region_location` 保留原始所在地文本以供审计。
+About 仍无法确定时，仅允许高确定性语言辅助映射：Thai -> `TH`、Vietnamese -> `VN`、Indonesian -> `ID`、Malay -> `MY`、Filipino -> `PH`、Lao -> `LA`、Khmer -> `KH`、Burmese -> `MM`、Arabic/Persian -> `Middle East`。语言已经得到地区时不得再调用群名 GeoNames。
+
+只有群名明确规则、About 和高确定性语言均无结果时，才对经过游戏实体屏蔽和多语言泛词过滤的群名候选调用 GeoNames；群名 GeoNames 结果必须与主名称或 alternate name 精确一致。`__region_location` 保留原始所在地文本以供审计。
 
 English、Spanish、Chinese、French、Portuguese、Mixed 等语言只作为语言展示，不得单独强制映射国家地区。Arabic / Persian 只在国家未知时辅助归入 `Middle East`；若明确识别到非洲国家，则优先输出 `Africa`，Egypt 例外归入 `Middle East`。
 

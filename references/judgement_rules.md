@@ -1,4 +1,4 @@
-# 判定与过滤规则（V5.3.0）
+# 判定与过滤规则（V5.5.0）
 
 ## A. 第一轮：搜索与深翻页
 1. Skill 支持一次任务同时检索多个游戏。每个游戏必须独立生成搜索计划，不能把某个游戏的特殊变体扩散到其他游戏。
@@ -95,25 +95,10 @@
 - `group_size >= 100`；
 - 且 `today_posts >= threshold` 或 `week_new_fans >= threshold`。
 
-任何一项不达标时直接丢弃，不进入 `manual_review`。`manual_review` 至少包含以下字段：
-- `snapshot_date`
-- `game_name`
-- `group_name`
-- `group_url`
-- `group_size`
-- `today_posts`
-- `week_new_fans`
-- `language_signal`
-- `region`
-- `about_location`
-- `match_type`
-- `matched_phrase`
-- `negative_hit`
-- `review_reason`
-- `source_query`
-- `query_variant_type`
-- `source_is_seed_url`
-- `variant_threshold_applied`
+任何一项不达标时直接丢弃，不进入 `manual_review`。V5.4.0 起：
+- A:AE 与 `detail` 完全一致，可直接批量复制粘贴。
+- K/L 使用相同公式和 `0.00%` 格式。
+- AF:AO 依次保存 `language_signal`、`about_location`、`match_type`、`matched_phrase`、`negative_hit`、`review_reason`、`source_query`、`query_variant_type`、`source_is_seed_url`、`variant_threshold_applied`。
 
 ## H. 跨游戏去重归属
 1. 同一 `group_url` 只允许在 `detail` 工作表输出一条。
@@ -176,3 +161,13 @@
 - 当前游戏标题的组成词不得单独成为 GeoNames query。
 - 语言识别对群名、About 用户文本、discussion posts 和 snippet 使用同一标题屏蔽集合。
 - 屏蔽只用于地区候选和语言识别，不改变相关性匹配使用的原始群名。
+
+
+## V5.5.0 地区上下文规则
+
+27. 群名没有明确地区证据时，About Location 本地规则和 GeoNames 必须先于语言映射。
+28. About 仍无结果时，允许的高确定性语言映射必须先于群名 GeoNames；语言已有 `TH/ID/MY/...` 结果时不得再调用群名 GeoNames。
+29. 群名 GeoNames 只接受 query 与 GeoNames 主名称或 alternate name 完全一致的结果；前缀/包含式匹配必须记为 `rejected_context_mismatch`。
+30. 泰语、印尼语、马来语交易词、普通社群词、游戏系列词和孤立非拉丁文字 token 不得成为群名 GeoNames query。
+31. GeoNames query 屏蔽集合应包含本批次所有游戏实体名称、aliases、兄弟标题、IP roots 与受控变体。
+32. 缓存使用 `geonames-v5.5` namespace；旧缓存不得影响 V5.5.0。

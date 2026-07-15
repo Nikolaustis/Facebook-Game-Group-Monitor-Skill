@@ -1,4 +1,4 @@
-# 质量检查清单 V5.3.0
+# 质量检查清单 V5.5.0
 
 ## 运行前
 
@@ -58,6 +58,9 @@
 - [ ] `exact_phrase_in_full_text` 记录应进入 `manual_review`，而不是 `detail`。
 - [ ] `manual_review` 中每条记录均满足 `group_size >= 100`，且 `today_posts >= threshold` 或 `week_new_fans >= threshold`。
 - [ ] `manual_review` 包含 `group_size`、`today_posts`、`week_new_fans` 三列。
+- [ ] `manual_review` 的 A:AE 与 `detail` 字段名称和顺序完全一致。
+- [ ] `manual_review` 的 K/L 为公式单元格，数字格式为 `0.00%`。
+- [ ] 人工复核专属字段只从 AF 列开始追加。
 - [ ] `audit_stats.json` 中 `manual_review_dropped_group_size` 与 `manual_review_dropped_activity` 统计合理。
 - [ ] `compact_title_in_group_name` 可以进入 `detail`，但应能在 `debug_rows.json` 查到命中来源。
 - [ ] `connector_x_title_in_group_name` 只有通过更高活跃门槛后才可进入 `detail`。
@@ -92,3 +95,18 @@
 - [ ] 帖子正文中反复出现游戏标题时，标题不计入 English 证据。
 - [ ] `partial_verified_rows.xlsx` 的 K/L 数据单元格显示为 `0.00%`。
 - [ ] 正常最终和恢复最终 XLSX 的 K/L 数据单元格同样显示为 `0.00%`。
+
+
+## V5.5.0 GeoNames 上下文专项检查
+
+- [ ] `Talk&Trade` 不产生 `talk` GeoNames query。
+- [ ] `GREEN-TOWN` 不产生 `green town` GeoNames query。
+- [ ] `@วิน` 等孤立泰语昵称不产生 GeoNames query。
+- [ ] `Jual/Beli`、`Pecinta Akun KUNING` 不产生 `jual / beli / akun / pecinta / kuning` query。
+- [ ] `Ovenbreak & Classic` 等已知游戏系列词不产生地点 query。
+- [ ] Thai 且 About 为空时输出 `TH`，不会被群名 GeoNames 覆盖。
+- [ ] Indonesian 且 About 为空时输出 `ID`，不会被群名 GeoNames 覆盖。
+- [ ] About 为 Simla/Shimla 时，About GeoNames 在 Thai 语言映射之前输出 `South Asia`。
+- [ ] 群名 `Paris / Boston / San Diego` 等精确地点仍可由 GeoNames 接受。
+- [ ] 包含式结果如 `talk -> Town Talk` 被标记为 `rejected_context_mismatch`。
+- [ ] `audit_stats.json.external_geocoder_rejected_context` 统计合理。

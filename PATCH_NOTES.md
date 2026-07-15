@@ -1,36 +1,46 @@
-# V5.3.0 补丁说明：游戏名称隔离与 K/L 百分比格式
+# V5.5.0 补丁说明：GeoNames 上下文校验与地区优先级
 
-## 问题 1：游戏标题被发送给 GeoNames
+## 修复的问题
 
-V5.2.x 虽然尝试移除标准游戏名，但只使用了 canonical game_name 和批次游戏名，未完整覆盖 aliases、CamelCase 拆分、受控变体与 IP 根词。以 `CookieRun Kingdom` 为 canonical 名时，`Cookie` 仍可能残留并被 GeoNames 解析为美国地名，造成 North America 假阳性。
+V5.3/V5.4 中，群名模糊 GeoNames 位于语言和 About 所在地之前，导致普通词被真实地名“碰撞”后直接写入错误地区，例如：
 
-## 修复 1
+- `Talk -> Town Talk, California`；
+- `GREEN-TOWN -> Green Town, Punjab`；
+- `วิน -> Winnipeg`；
+- `jual -> Kampung Telok Jual, Perak`；
+- `Ovenbreak / Classic` 等游戏系列词被当作地名。
 
-- 为每个游戏生成独立的标题屏蔽集合：正式名称、aliases、受控标题变体，以及长度足够的 IP 根词。
-- 自动拆分 CamelCase，例如 `CookieRun Kingdom -> Cookie Run Kingdom`。
-- GeoNames 候选抽取前先从原始群名删除完整标题，再执行 token 级二次清理。
-- 当前游戏名称不得进入 `__geocoder_query` 或 `__geocoder_attempted_queries`。
-- 缓存命名空间升级为 `geonames-v5.3`。
+## V5.5.0 修改
 
-## 问题 2：英文游戏标题干扰语言识别
+1. **地区优先级重排**
+   - 群名明确地区；
+   - About Location 本地规则；
+   - About Location GeoNames；
+   - 高确定性语言映射；
+   - 群名 GeoNames 最后兜底。
 
-群名和帖子中的英文游戏标题会增加 English 字母及关键词分数，可能把 `Cookie Run Kingdom ESPAÑOL` 之类群组误标为 English。
+2. **群名 GeoNames 精确名称约束**
+   - query 必须与 GeoNames 主名称或 alternate name 完全一致；
+   - 包含式/前缀式结果改为 `rejected_context_mismatch`；
+   - About Location 查询不受该精确限制。
 
-## 修复 2
+3. **多语言非地点词清洗**
+   - 泰语：购买、出售、交换、讨论、账号、代码等；
+   - 印尼语/马来语：`jual`、`beli`、`akun`、`pecinta`、`kuning` 等；
+   - 英语/品牌：`Talk&Trade`、`GREEN-TOWN`、`Ovenbreak & Classic` 等；
+   - 孤立非拉丁文字 token 不作为群名地点候选。
 
-- 群名、About 用户文本、帖子样本和 snippet 进入语言识别前，先删除当前游戏正式名称、aliases 和受控变体。
-- 讨论区仍保持“前五条玩家发言优先”的既有规则，但游戏标题不再计入任何语言证据。
+4. **游戏实体屏蔽扩大**
+   - GeoNames 屏蔽集合包含本批次所有游戏名称、aliases、兄弟标题、IP roots 和受控变体；
+   - 语言识别也屏蔽当前目标及兄弟标题。
 
-## 问题 3：K/L 列显示为 General 小数
+5. **缓存和审计**
+   - 缓存 namespace 升级为 `geonames-v5.5`；
+   - 新增 `external_geocoder_rejected_context`；
+   - 保留现有 `__geocoder_attempted_queries` 和错误原因。
 
-部分暂存或历史导出链路未写入百分比样式，导致 K/L 显示为小数或科学计数法。
+## 兼容性
 
-## 修复 3
-
-- `phase2_collect_details.js` 的暂存表与正常最终表对 K/L 公式单元格写入 `0.00%`。
-- `finalize_partial_xlsx.js` 的恢复最终表同步写入 `0.00%`。
-- XLSX 写入显式启用 `cellStyles: true`，并为 K/L 列写入百分比列格式。
-
-## 保留能力
-
-V5.2.2 的孤立 ID 保护与 About 地区冲突裁决、V5.2.1 的人工复核门槛、V5.2.0 的 GeoNames 安全过滤、V5.1.0 的自动启用、蒙古语识别、断点恢复与强制关机均保留。
+- 无新增 npm 依赖；
+- 保留 V5.4.0 的 detail/manual_review 列结构；
+- 保留 K/L `0.00%`、后台运行、断点恢复和强制关机。

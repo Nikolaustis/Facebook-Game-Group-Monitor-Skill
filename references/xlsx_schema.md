@@ -1,4 +1,4 @@
-# Excel 字段规范（V5.3.0）
+# Excel 字段规范（V5.5.0）
 
 V3.6.1 起不再读写或保存 CSV。第二轮只输出 `fb_monitoring_filtered.xlsx`，并在同一个工作簿中包含：
 
@@ -10,13 +10,13 @@ V3.6.1 起不再读写或保存 CSV。第二轮只输出 `fb_monitoring_filtered
 ## detail 固定列顺序
 
 ```text
-snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size,today_posts,week_new_fans,活跃指数=当日新帖/社群规模,规模增速=上周新增/(社群规模-上周新增）,existed_last_month,is_relevant,action,action_reason,risk_level,__region_source,__region_keyword_hits,__region_location
+snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size,today_posts,week_new_fans,活跃指数=当日新帖/社群规模,规模增速=上周新增/(社群规模-上周新增）,existed_last_month,is_relevant,action,action_reason,risk_level,__region_source,__region_keyword_hits,__region_location,__geocoder_provider,__geocoder_status,__geocoder_source,__geocoder_query,__geocoder_attempted_queries,__geocoder_endpoint,__geocoder_error_reason,__geocoder_country_code,__geocoder_place_name,__geocoder_admin1,__geocoder_confidence
 ```
 
 ## detail 字段说明
 
 - `snapshot_date`：文本格式，示例 `2026-05-07`，不得保存为 Excel 日期序列号。
-- `region`：优先由群组名称中的明确国家/地区/属地/大区语义、受控别名或国旗 emoji 得到，再按业务区域规则归并输出；未命中时可使用允许的高确定性语言映射；若上述链路仍无法确定，才从 About 页明确标注的“所在地 / Location”字段中识别国家/地区或高确定性城市。若多个命中项属于同一业务大区，输出该大区；跨业务大区冲突且 About 所在地也无法解决时留空。
+- `region`：群名明确国家/地区/属地/大区或本地城市优先；未命中时先解析 About 页明确的“所在地 / Location”（本地规则后接 GeoNames），再使用允许的高确定性语言映射，最后才调用群名 GeoNames。群名 GeoNames 只接受精确地名匹配。若多个群名命中项属于同一业务大区且 About 无法裁决，可输出该大区；跨业务大区冲突留空。
 - `language`：以讨论区前五条可见玩家发言为主，先逐条识别再汇总；若前五条出现两个以上可信语言，标记为 `Mixed`。群名辅助，用户手写 about 非 UI 文本最低优先级兜底。所有语言证据在识别前先剔除当前游戏正式名称、别名和受控变体。
 - `Mongolian` / `Russian` 区分：`Ө/ө`、`Ү/ү` 或高确定性蒙古语词组优先输出 `Mongolian`；没有蒙古语证据的通用西里尔文本才输出 `Russian`。`Mongolia` / `Mongolian` 等地理词不单独决定语言。
 - `game_name`：用户输入的目标游戏名。
@@ -35,15 +35,20 @@ snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size
 - `risk_level`：`low` / `medium` / `high`。
 - `__region_source`：地区来源，例如 `country_keyword` / `country_flag` / `country_keyword_and_flag` / `region_keyword` / `country_keyword_same_business_region` / `language_map` / `about_location_country_keyword` / `about_location_city_keyword` / `about_location_adjudicated_group_name_conflict` / `external_geocoder_about_location_adjudicated_group_name_conflict` / `keyword_conflict` / 留空。
 - `__region_keyword_hits`：地区关键词命中详情；当 About 所在地兜底介入时，会以 `group_name:` 与 `about_location:` 前缀标记证据来源。
-- `__region_location`：从 About 页明确“所在地 / Location”字段提取的原始位置文本，仅用于地区判断审计；它不会覆盖已由群名或允许语言映射得到的 `region`。
+- `__region_location`：从 About 页明确“所在地 / Location”字段提取的原始位置文本，仅用于地区判断和审计；它不会覆盖群名中的明确地区，但在群名无明确地区时优先于语言映射和群名模糊 GeoNames。
 
 ## manual_review 固定列顺序
 
+`manual_review` 的前 31 列必须与当前实际 `detail` 完全相同；人工复核专属字段依次追加在最后：
+
 ```text
-snapshot_date,game_name,group_name,group_url,group_size,today_posts,week_new_fans,language_signal,region,about_location,match_type,matched_phrase,negative_hit,review_reason,source_query,query_variant_type,source_is_seed_url,variant_threshold_applied
+snapshot_date,region,language,game_name,group_name,group_url,group_id,group_size,today_posts,week_new_fans,活跃指数=当日新帖/社群规模,规模增速=上周新增/(社群规模-上周新增）,existed_last_month,is_relevant,action,action_reason,risk_level,__region_source,__region_keyword_hits,__region_location,__geocoder_provider,__geocoder_status,__geocoder_source,__geocoder_query,__geocoder_attempted_queries,__geocoder_endpoint,__geocoder_error_reason,__geocoder_country_code,__geocoder_place_name,__geocoder_admin1,__geocoder_confidence,language_signal,about_location,match_type,matched_phrase,negative_hit,review_reason,source_query,query_variant_type,source_is_seed_url,variant_threshold_applied
 ```
 
-`manual_review` 仅保留已经通过 `group_size >= 100` 且满足 `today_posts >= threshold` 或 `week_new_fans >= threshold` 的弱相关候选。
+- A:AE 可以直接批量复制到 `detail`。
+- K/L 必须为与 detail 相同的 Excel 公式和 `0.00%` 格式。
+- AF:AO 仅保存人工复核专属证据。
+- `manual_review` 仍只保留已经通过 `group_size >= 100`，且满足 `today_posts >= threshold` 或 `week_new_fans >= threshold` 的弱相关候选。
 
 ## debug_rows.json 字段
 
@@ -74,3 +79,10 @@ __match_score,__match_type,__matched_phrase,__source_query,__source_queries,__qu
 - GeoNames query 生成前必须删除当前游戏标题、aliases、受控变体和高确定性 IP 根词。
 - 游戏标题屏蔽不得影响原始 `group_name` 输出或相关性判定。
 - K/L 百分比格式必须存在于 partial、正常 final 和 recovery final 三类工作簿。
+
+
+## V5.5 GeoNames 上下文补充
+
+- 群名 query 的包含式/前缀式 GeoNames 结果不得写入 `region`，状态为 `rejected_context_mismatch`。
+- `audit_stats.json.external_geocoder_rejected_context` 记录此类上下文拒绝。
+- V5.5 不新增 XLSX 列，detail 与 manual_review 列结构继续沿用 V5.4.0。
