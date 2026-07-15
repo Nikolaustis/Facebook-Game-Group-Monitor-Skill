@@ -1,4 +1,4 @@
-# 质量检查清单 V5.6.0
+# 质量检查清单 V5.7.0
 
 ## 运行前
 
@@ -15,6 +15,15 @@
 - [ ] `phase1_index.json` 中每个游戏都有 `search_plan` 和 `query_runs`。
 - [ ] 候选中保留 `source_query`、`query_variant_type`、`source_is_seed_url` 等字段。
 - [ ] 到达深翻停止条件后，已向用户确认“可以停止，继续 / 继续深翻”。
+
+## V5.7.0 群名预筛
+
+- [ ] `phase2_name_prefilter_enabled` 默认为 1。
+- [ ] 第一轮群名完整且完全无关的候选记为 `prefilter_dropped_not_relevant`，不会增加 `about_attempted`。
+- [ ] 强标题命中增加 `phase2_name_prefilter_passed_strong`。
+- [ ] IP root / sibling 等弱命中默认增加 `phase2_name_prefilter_passed_manual_review` 并继续采集。
+- [ ] seed URL、缺失或截断群名增加 `phase2_name_prefilter_inconclusive`，不得被预筛丢弃。
+- [ ] `about_avoided_by_name_prefilter` 与预筛跳过数量一致或可解释。
 
 ## 第二轮后
 

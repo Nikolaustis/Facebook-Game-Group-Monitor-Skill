@@ -20,6 +20,11 @@
     ]
   },
   "threshold": 10,
+  "phase2_name_prefilter": {
+    "enabled": true,
+    "allow_manual_review_candidates": true,
+    "treat_incomplete_as_inconclusive": true
+  },
   "progress_report_every_minutes": 30,
   "allowed_language_signals": [],
   "allowed_regions": [],

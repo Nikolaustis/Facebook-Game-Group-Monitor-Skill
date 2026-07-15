@@ -1,11 +1,22 @@
 ---
-name: fb-group-monitor-v5.6.0
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.6.0 增加多语种 GeoNames 停用词、上下文受限地名、整 token 游戏词清理、多词地名不降级、危险 ISO 代码保护与本地地区别名；同时保留 About/语言优先、人工复核表对齐、百分比格式、断点保存和锁屏强制关机。
+name: fb-group-monitor-v5.7.0
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V5.7.0 在第二轮打开 About/讨论页前，先使用第一轮候选群名执行相关性预筛，明显无关候选直接跳过；同时保留 V5.6.0 GeoNames 安全过滤、人工复核表对齐、百分比格式、断点保存和锁屏强制关机。
 ---
 
-# Facebook Group Monitor V5.6.0
+# Facebook Group Monitor V5.7.0
 
 
+
+
+## V5.7.0 第二轮群名预筛
+
+- 第一轮候选已有完整 `group_name` 时，第二轮先在本地匹配目标游戏正式名称、aliases、受控变体、兄弟标题和 IP root。
+- 明确 `no_match` 的候选直接记为 `prefilter_dropped_not_relevant`，不再打开 `/about` 或讨论/发帖页面。
+- 正式标题、紧凑标题、受控 `connector_x` 命中继续进入完整第二轮。
+- IP root、兄弟标题等人工复核型弱命中默认继续进入 About，并仍须通过成员规模与活跃度门槛。
+- seed URL、缺失群名或以省略号结尾的截断群名视为 `inconclusive`，不得仅凭预筛丢弃。
+- 默认启用；可在任务配置中设置 `phase2_name_prefilter.enabled=false` 临时关闭。
+- `audit_stats.json` 新增预筛通过、跳过、无法判断和节省 About 访问次数。
 
 ## V5.6.0 GeoNames 多语种安全过滤与地名抽取
 

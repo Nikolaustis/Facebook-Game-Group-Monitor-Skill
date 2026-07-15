@@ -1,6 +1,28 @@
-# FB Game Group Monitor Skill V5.6.0
+# FB Game Group Monitor Skill V5.7.0
 
 
+
+
+## V5.7.0 第二轮候选群名预筛
+
+第二轮不再先打开所有候选的 About 页面。对于第一轮已经采集到完整群名的候选，会先做纯本地相关性预筛：
+
+- 完整/紧凑目标标题或受控变体命中：继续采集 About 与讨论页；
+- IP root、兄弟标题等弱相关样本：默认继续，以保留人工复核能力；
+- 群名完整且完全无相关证据：立即跳过，不访问 About/发帖页；
+- seed URL、群名缺失或明显截断：无法预判，继续进入 About。
+
+配置：
+
+```json
+"phase2_name_prefilter": {
+  "enabled": true,
+  "allow_manual_review_candidates": true,
+  "treat_incomplete_as_inconclusive": true
+}
+```
+
+统计新增：`phase2_name_prefilter_checked`、`phase2_name_prefilter_passed_strong`、`phase2_name_prefilter_passed_manual_review`、`phase2_name_prefilter_inconclusive`、`phase2_name_prefilter_skipped_no_match`、`phase2_name_prefilter_skipped_manual_review`、`about_avoided_by_name_prefilter`。
 
 ## V5.6.0 GeoNames 多语种停用词、上下文限制与抽取修复
 
@@ -109,7 +131,7 @@ Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Forc
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V5.6.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.6.0 同时保留此前对蒙古语误判为俄语的修复。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V5.7.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.7.0 同时保留此前对蒙古语误判为俄语的修复。
 
 
 ## GeoNames 外部地理解析兜底

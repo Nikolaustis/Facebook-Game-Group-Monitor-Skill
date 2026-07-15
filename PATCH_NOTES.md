@@ -1,19 +1,27 @@
-# V5.6.0 补丁说明：GeoNames 多语种停用词与地名抽取安全升级
+# V5.7.0 补丁说明：第二轮群名预筛与 About 访问加速
 
 ## 核心修改
 
-1. 扩充英语、泰语、越南语、印尼语/马来语、西语、葡语、法语、中文和阿语停用词。
-2. 新增上下文受限地名：普通词/品牌词不得孤立查询，带行政区或国家上下文的完整短语仍可使用。
-3. 游戏名称融合 token 整体丢弃，避免 `PokeMonedas -> edas`、`Pok'emon -> Pok`。
-4. 多词地名不再降级为任意单词；保留 `San Diego / El Paso / San Antonio / Fort Worth`。
-5. 群名单 token 结果增加行政层级/人口门槛，默认人口下限 50,000。
-6. 屏蔽高风险孤立 ISO 代码：`ID / IN / IT / NO / TO / ME / MY / LA / DE / TR / TM / AT / IS / BE`。
-7. 新增 `Hàn Quốc / LATHAM / GDL / SEQ+Brisbane / Arab(s)` 等本地别名。
-8. `Georgia` 单独出现不再直接判为欧洲。
-9. 缓存升级为 `geonames-v5.6`。
-10. 新增统计 `external_geocoder_context_restricted_queries`。
+1. 第二轮在打开 `/about` 和讨论页之前，优先使用第一轮候选卡片的 `group_name` 做本地相关性预筛。
+2. 群名完整且不命中目标标题、别名、受控变体、兄弟标题或 IP root 时，直接跳过。
+3. 强命中继续进入完整采集；IP root/兄弟标题等弱命中默认保留到人工复核链路。
+4. seed URL、缺失群名、截断群名视为无法预判，仍打开 About，避免错误漏采。
+5. 新增 `phase2_name_prefilter` 配置和预筛审计统计。
+6. 不改变 About 后的正式相关性、活跃阈值、语言、地区、GeoNames、冲突归属和 Excel 输出规则。
+
+## 新增统计
+
+- `phase2_name_prefilter_enabled`
+- `phase2_name_prefilter_checked`
+- `phase2_name_prefilter_passed_strong`
+- `phase2_name_prefilter_passed_manual_review`
+- `phase2_name_prefilter_inconclusive`
+- `phase2_name_prefilter_skipped_no_match`
+- `phase2_name_prefilter_skipped_manual_review`
+- `about_avoided_by_name_prefilter`
 
 ## 兼容性
 
-- 基于 V5.5.0 累计升级，保留 V5.4.0 人工复核表对齐、K/L 百分比格式、断点恢复、GeoNames 自动启用和锁屏强制关机。
+- 基于 V5.6.0 累计升级。
+- 默认保留人工复核型弱命中，不降低现有召回。
 - 不新增 npm 依赖。

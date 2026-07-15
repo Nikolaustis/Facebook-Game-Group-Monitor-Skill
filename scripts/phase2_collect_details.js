@@ -2570,6 +2570,53 @@ function matchGame(profile, groupName, aboutText, snippet) {
   };
 }
 
+
+// V5.7: phase-2 candidate-name prefilter.
+// First-round search cards already contain a group_name in normal runs. Use that
+// cheap evidence before opening /about or the discussion feed. The prefilter only
+// rejects a candidate when the card name is present, complete enough to judge, and
+// has no target/sibling/IP-root evidence at all. Strong and manual-review-worthy
+// matches continue through the existing authoritative second-round pipeline.
+function looksLikeIncompleteCandidateGroupName(groupName) {
+  const name = clean(groupName || '');
+  if (!name) return true;
+  if (/[.…]{2,}\s*$/.test(name) || /\u2026\s*$/.test(name)) return true;
+  if (/^(?:facebook group|group|community|loading|see more)$/i.test(name)) return true;
+  return false;
+}
+
+function precheckCandidateGroupName(profile, groupName, options = {}) {
+  const enabled = options.enabled !== false;
+  const allowManualReviewCandidates = options.allow_manual_review_candidates !== false;
+  const treatIncompleteAsInconclusive = options.treat_incomplete_as_inconclusive !== false;
+  const name = clean(groupName || '');
+
+  if (!enabled) {
+    return { decision: 'disabled', pass: true, reason: 'prefilter_disabled', match: null };
+  }
+  if (!name) {
+    return { decision: 'inconclusive', pass: true, reason: 'missing_group_name', match: null };
+  }
+  if (treatIncompleteAsInconclusive && looksLikeIncompleteCandidateGroupName(name)) {
+    return { decision: 'inconclusive', pass: true, reason: 'incomplete_group_name', match: null };
+  }
+
+  // Do not use snippet/About here: this optimization is deliberately based only
+  // on the first-round group name, so unrelated search noise never opens Facebook
+  // detail pages.
+  const match = matchGame(profile, name, '', '');
+  if (match.matched) {
+    return { decision: 'strong_match', pass: true, reason: match.type || 'strong_match', match };
+  }
+  if (match.manual_review && allowManualReviewCandidates) {
+    return { decision: 'manual_review_match', pass: true, reason: match.type || 'manual_review_match', match };
+  }
+  if (match.manual_review && !allowManualReviewCandidates) {
+    return { decision: 'skip_manual_review_match', pass: false, reason: match.type || 'manual_review_match', match };
+  }
+  return { decision: 'skip_no_match', pass: false, reason: match.type || 'no_match', match };
+}
+
 function extractGroupSize(aboutText) {
   const t = clean(aboutText);
   let m;
@@ -3353,6 +3400,16 @@ function resolveCollisions(rows) {
   const shutdownDelaySeconds = parseNonNegativeInt(args['shutdown-delay-seconds'] ?? config.shutdown_delay_seconds, 60);
   const threshold = Number(args.threshold || config.threshold || 10);
   const candidateTimeoutMs = Math.max(1000, Number(args['candidate-timeout-ms'] || config.candidate_timeout_ms || 60000));
+  const namePrefilterConfig = config.phase2_name_prefilter && typeof config.phase2_name_prefilter === 'object'
+    ? config.phase2_name_prefilter
+    : {};
+  const phase2NamePrefilter = {
+    enabled: args['name-prefilter'] !== undefined
+      ? boolLike(args['name-prefilter'], true)
+      : boolLike(namePrefilterConfig.enabled, true),
+    allow_manual_review_candidates: boolLike(namePrefilterConfig.allow_manual_review_candidates, true),
+    treat_incomplete_as_inconclusive: boolLike(namePrefilterConfig.treat_incomplete_as_inconclusive, true),
+  };
   const aliasesConfig = config.aliases && typeof config.aliases === 'object' ? config.aliases : {};
   const siblingTitlesConfig = config.sibling_titles && typeof config.sibling_titles === 'object' ? config.sibling_titles : {};
   const ipRootsConfig = config.ip_roots && typeof config.ip_roots === 'object' ? config.ip_roots : {};
@@ -3432,6 +3489,14 @@ function resolveCollisions(rows) {
     const stats = {
       total_candidates: 0,
       skipped_card_lt_100: 0,
+      phase2_name_prefilter_enabled: phase2NamePrefilter.enabled ? 1 : 0,
+      phase2_name_prefilter_checked: 0,
+      phase2_name_prefilter_passed_strong: 0,
+      phase2_name_prefilter_passed_manual_review: 0,
+      phase2_name_prefilter_inconclusive: 0,
+      phase2_name_prefilter_skipped_no_match: 0,
+      phase2_name_prefilter_skipped_manual_review: 0,
+      about_avoided_by_name_prefilter: 0,
       about_attempted: 0,
       about_fetches: 0,
       about_cache_hits: 0,
@@ -3743,6 +3808,27 @@ function resolveCollisions(rows) {
         if (!(typeof cardMembers === 'number' && Number.isFinite(cardMembers) && cardMembers >= 100)) {
           stats.skipped_card_lt_100++;
           markCandidateCheckpoint('skipped_card_lt_100');
+          continue;
+        }
+
+        const firstRoundGroupName = clean(c.group_name || '');
+        const namePrefilter = precheckCandidateGroupName(profile, firstRoundGroupName, phase2NamePrefilter);
+        if (phase2NamePrefilter.enabled) {
+          stats.phase2_name_prefilter_checked++;
+          if (namePrefilter.decision === 'strong_match') stats.phase2_name_prefilter_passed_strong++;
+          else if (namePrefilter.decision === 'manual_review_match') stats.phase2_name_prefilter_passed_manual_review++;
+          else if (namePrefilter.decision === 'inconclusive') stats.phase2_name_prefilter_inconclusive++;
+          else if (namePrefilter.decision === 'skip_manual_review_match') stats.phase2_name_prefilter_skipped_manual_review++;
+          else if (namePrefilter.decision === 'skip_no_match') stats.phase2_name_prefilter_skipped_no_match++;
+        }
+        if (!namePrefilter.pass) {
+          stats.dropped_not_relevant++;
+          stats.about_avoided_by_name_prefilter++;
+          markCandidateCheckpoint('prefilter_dropped_not_relevant', {
+            prefilter_decision: namePrefilter.decision,
+            prefilter_reason: namePrefilter.reason || '',
+            prefilter_match_type: namePrefilter.match && namePrefilter.match.type ? namePrefilter.match.type : '',
+          });
           continue;
         }
 

@@ -9,6 +9,7 @@
   [string]$Config = "",
   [string]$Cdp = "http://127.0.0.1:9222",
   [int]$ProgressReportEveryMinutes = 30,
+  [switch]$Resume,
   [switch]$NoCloseChrome,
   [switch]$ShutdownAfterComplete,
   [int]$ShutdownDelaySeconds = 60
@@ -121,6 +122,10 @@ if ($Task -eq "login") {
   Add-QuotedArg $cmd ([string]$ProgressReportEveryMinutes)
   if ($NoCloseChrome) {
     $cmd.Add('--no-close-chrome') | Out-Null
+    Add-QuotedArg $cmd "true"
+  }
+  if ($Resume) {
+    $cmd.Add('--resume') | Out-Null
     Add-QuotedArg $cmd "true"
   }
   if ($ShutdownAfterComplete) {
