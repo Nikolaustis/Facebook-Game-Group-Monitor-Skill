@@ -20,6 +20,7 @@
     ]
   },
   "threshold": 10,
+  "phase2_auto_resume": true,
   "phase2_name_prefilter": {
     "enabled": true,
     "allow_manual_review_candidates": true,

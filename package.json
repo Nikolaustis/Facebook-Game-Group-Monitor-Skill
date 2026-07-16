@@ -1,7 +1,7 @@
 {
-  "name": "fb-group-monitor-skill-v5-7-0",
-  "version": "5.7.0",
-  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with V5.7 first-round group-name prefiltering before About/discussion fetches, plus V5.6 GeoNames safety filters, detail-aligned manual review, percentage metrics, autosave, and lock-screen-safe forced shutdown watching",
+  "name": "fb-group-monitor-skill-v6-0-0",
+  "version": "6.0.0",
+  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with V6.0 Task Scheduler execution, reboot-safe automatic resume, per-candidate full checkpoints, runtime power guard, strict finalization-gated shutdown, and self-deleting scheduled tasks.",
   "private": true,
   "scripts": {
     "login": "powershell -ExecutionPolicy Bypass -File .\\scripts\\open_chrome_9222.ps1",
@@ -14,7 +14,8 @@
     "phase1:bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start_background_task.ps1 -Task phase1",
     "phase2:bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start_background_task.ps1 -Task phase2",
     "monitor:bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start_background_task.ps1 -Task monitor",
-    "status:bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\show_background_task_status.ps1"
+    "status:bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\show_background_task_status.ps1",
+    "phase2:direct-bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start_background_task.ps1 -Task phase2 -DirectBackground"
   },
   "dependencies": {
     "playwright": "^1.59.1",

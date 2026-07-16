@@ -1,4 +1,56 @@
-# FB Game Group Monitor Skill V5.7.0
+# V6.0.0 任务计划程序、逐候选完整断点与运行期电源保护
+
+V6.0.0 将第二轮后台执行默认切换为 Windows【任务计划程序】。任务以同一 `RunDir` 的确定性名称创建，立即启动，并附加 `AtLogOn` 触发器：Windows 更新或系统重启中断任务后，用户重新登录 Windows 时会自动打开持久化 Chrome 并从完整 checkpoint 续跑。
+
+核心规则：
+
+- 每处理一个候选，都原子写入完整 `phase2_autosave_state.json`，同时保存 `detail` 暂存行、`manual_review` 行、stats 与游标；候选处理中断时游标保持在上一条完整记录，下次重跑未完成候选；
+- 恢复只读取完整 checkpoint 的游标，`phase2_progress.json` 仅用于观察，不能把恢复位置推进到尚未保存完整数据的位置；
+- 第二轮运行期间启动 `runtime_power_guard.ps1`：保持系统唤醒，并周期性执行 `shutdown.exe /a`，取消可撤销的待执行关机/重启；
+- 完成后关机必须通过严格门槛：最终 XLSX、summary、collision、audit、debug rows、finalized checkpoint、finalized progress、completion token 和 Chrome 关闭状态全部有效；
+- 关机 watcher 启动失败时不再直接回退关机，机器保持开机；
+- 任务计划程序任务在每次正常执行结束后立即自删除；如果执行被系统重启打断，则保留到下次登录自动续跑，续跑正常结束后删除；
+- 同一 `RunDir` 已有正在运行的任务时，不覆盖 manifest，也不创建重复实例。
+
+正常启动：
+
+```powershell
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json"
+```
+
+查看任务与电源保护状态：
+
+```powershell
+npm run status:bg -- -RunDir ".\runs\demo"
+```
+
+需要临时绕过任务计划程序、继续使用旧式直接后台进程时：
+
+```powershell
+npm run phase2:direct-bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json"
+```
+
+> 运行期电源保护属于用户态防护。它能阻止睡眠并取消可撤销的关机/重启倒计时，但无法百分之百覆盖断电、固件、管理员强制操作、内核故障或不可撤销的 Windows 更新重启。因此 V6.0 同时依靠逐候选完整 checkpoint 与登录后自动续跑降低风险。
+
+# V5.8.0 GeoNames 稳定性与自动恢复
+
+本版本修复 GeoNames 返回对象型 `alternateNames` 时触发的类型错误。第二轮在相同运行目录发现可恢复 checkpoint 时会自动继续，不必再手工追加 `--resume true`。
+
+正常继续同一目录：
+
+```powershell
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json"
+```
+
+上述命令若发现未完成 checkpoint，会自动续跑。需要放弃旧断点并从第 1 条重跑：
+
+```powershell
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -FreshStart
+```
+
+配置项 `phase2_auto_resume` 默认是 `true`。显式 `--fresh-start true` 或 PowerShell 的 `-FreshStart` 优先。
+
+# FB Game Group Monitor Skill V6.0.0
 
 
 
@@ -131,7 +183,7 @@ Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Forc
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V5.7.0 支持后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回 PID 与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.7.0 同时保留此前对蒙古语误判为俄语的修复。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V6.0.0 支持任务计划程序后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回任务计划程序名称与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.8.0 同时保留此前对蒙古语误判为俄语的修复。
 
 
 ## GeoNames 外部地理解析兜底
@@ -158,7 +210,7 @@ GeoNames 用户名放在 `config/local/geonames.local.json`，根目录 `.gitign
 - 群名没有明确地区时，优先读取 About 页中明确标注的“所在地 / Location”字段；About 本地规则或 GeoNames 均高于语言映射和群名模糊 GeoNames。
 - About 仍无结果时，使用泰语、印尼语等高确定性语言映射；只有语言也无法判定时，才调用群名 GeoNames。
 - Excel 输出固定列顺序，`snapshot_date` 和 `group_id` 强制文本格式，活跃指数/规模增速为百分比公式。
-- 后台启动后会立即返回 PID 与日志路径；第二轮默认每 30 分钟输出一次 `codex_progress_report`，并刷新 `codex_progress_report.json`。
+- 第二轮后台启动后会立即返回任务计划程序名称、日志路径和运行目录；默认每 30 分钟输出一次 `codex_progress_report`，并刷新 `codex_progress_report.json`。
 - 可选“完成后关机”：默认不启用。启用后会在最终报表生成并确认 Chrome 已关闭后，启动独立 Node 监控器；该监控器等待第二轮进程退出、核验结果文件，再执行 `shutdown.exe /s /f /t <秒数>`。
 
 ## 变体规则
@@ -222,7 +274,7 @@ npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo
 
 后台启动脚本会立即返回：
 
-- `pid`：后台进程 ID。
+- `scheduled_task_name`：第二轮对应的任务计划程序任务名；正常执行结束后自删除。
 - `run_dir`：当前输出目录。
 - `stdout_log` / `stderr_log`：后台日志。
 - `codex_progress_report.json`：Codex 进度快照。
@@ -255,7 +307,7 @@ node .\scripts\phase2_collect_details.js --index ".\runs\demo\phase1_index.json"
 
 设为 `0` 可关闭定时汇报。第二轮最终 Excel 报告生成后默认自动关闭 Chrome；如需保留浏览器，加 `--no-close-chrome true`，或在配置中设置 `"close_chrome_after_report": false`。
 
-自动关机默认关闭。只有当用户在提示词中明确要求“完成后关机 / 跑完关机”时，Codex 才能使用 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true`。触发后，第二轮会先写入最终报表并确认 Chrome 已关闭，再启动独立 Node 关机监控器。监控器在第二轮 Node 进程退出后核验 Excel 与完成状态，随后执行：`shutdown.exe /s /f /t <秒数> /d p:0:0 /c "..."`。`/f` 会强制关闭阻塞应用，监控器在锁屏状态下仍会运行；默认延迟 60 秒，期间可用 `shutdown.exe /a` 取消。若监控器启动失败，第二轮脚本会直接发送相同的带 `/f` 强制关机命令作为回退。
+自动关机默认关闭。只有当用户在提示词中明确要求“完成后关机 / 跑完关机”时，Codex 才能使用 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true`。触发后，第二轮会先写入最终报表并确认 Chrome 已关闭，再启动独立 Node 关机监控器。监控器在第二轮 Node 进程退出后核验 Excel 与完成状态，随后执行：`shutdown.exe /s /f /t <秒数> /d p:0:0 /c "..."`。`/f` 会强制关闭阻塞应用，监控器在锁屏状态下仍会运行；默认延迟 60 秒，期间可用 `shutdown.exe /a` 取消。若监控器启动失败或任一严格校验不通过，第二轮不会发送关机命令，电脑保持开机。
 
 ## 输出文件
 
@@ -270,8 +322,8 @@ node .\scripts\phase2_collect_details.js --index ".\runs\demo\phase1_index.json"
 第二阶段运行中会即时生成/刷新：
 
 - `codex_progress_report.json`: Codex 定时进度快照，第二轮默认每 30 分钟刷新一次，并向 stdout 日志输出 `codex_progress_report`。
-- `phase2_progress.json`: 轻量进度文件，每处理 1 个候选刷新一次；用于观察当前跑到哪个游戏/第几个候选。
-- `phase2_autosave_state.json`: 完整恢复状态；在阶段开始、游戏边界、每条命中有效行、异常退出前刷新，包含已通过筛选的 `staged_rows`、人工复核行和统计。
+- `phase2_progress.json`: 轻量进度文件，每处理 1 个候选刷新一次；仅用于观察当前跑到哪个游戏/第几个候选，不参与恢复游标。
+- `phase2_autosave_state.json`: 完整恢复状态；V6.0 每处理 1 个候选即原子刷新，包含 `staged_rows`、人工复核行、统计和同一游标。
 - `phase2_autosave_summary.json`: 当前局部摘要，保持兼容旧观察命令。
 - `partial_verified_rows.xlsx`: 已通过筛选行的可读暂存表；启动时先创建表头，每命中 1 条有效群组就立即保存。
 - `phase2_autosave_last_error.txt`: 仅当暂存 Excel 写入失败时出现；通常是文件被 Excel 打开占用。
@@ -358,8 +410,8 @@ npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo
 
 第二阶段默认采用更轻的即时保存方式：
 
-- 每处理 1 个候选，刷新 `phase2_progress.json` 和 `phase2_autosave_summary.json`，不重写 xlsx。
-- 只有当某个群组通过全部筛选并进入有效结果时，才立刻刷新 `partial_verified_rows.xlsx` 和完整 `phase2_autosave_state.json`。
+- 每处理 1 个候选，刷新 `phase2_progress.json`、`phase2_autosave_summary.json` 和完整 `phase2_autosave_state.json`；完整状态包含 detail 暂存、manual_review、stats 与游标。
+- 只有当某个群组通过全部筛选并进入有效结果时，才刷新 `partial_verified_rows.xlsx`，避免对 XLSX 进行不必要的逐候选重写。
 - 这样既保留断点进度，又避免“每个候选都重写完整 Excel”的额外开销。
 
 如果中途断电、Ctrl+C、浏览器崩溃或脚本报错，不要删除 run 目录，直接用自动保存状态恢复当前已跑出的结果：

@@ -29,8 +29,93 @@ process.once('unhandledRejection', (err) => {
   emergencyExit(`unhandledRejection: ${err && err.message ? err.message : err}`, 1);
 });
 
+function scalarText(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  if (Array.isArray(value)) return value.map((item) => scalarText(item)).filter(Boolean).join(' ');
+  if (typeof value === 'object') {
+    for (const key of ['name', 'asciiName', 'toponymName', 'alternateName', 'value', 'label']) {
+      if (value[key] !== undefined && value[key] !== null) {
+        const text = scalarText(value[key]);
+        if (text) return text;
+      }
+    }
+    return '';
+  }
+  return String(value);
+}
+
 function clean(s) {
-  return (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  return scalarText(s).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function readJsonSafe(file) {
+  try {
+    if (!file || !fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    console.warn(`[phase2] ignored unreadable JSON ${file}: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+}
+
+function sameResolvedPath(a, b) {
+  if (!a || !b) return false;
+  const left = path.resolve(String(a)).replace(/\\/g, '/').toLowerCase();
+  const right = path.resolve(String(b)).replace(/\\/g, '/').toLowerCase();
+  return left === right;
+}
+
+function progressCursor(progress) {
+  if (!progress || typeof progress !== 'object') return [-1, -1, -1];
+  const gameIndex = Number(progress.current_game_index || -1);
+  const processed = Number((progress.current_game_breakdown || {}).processed ?? progress.current_candidate_index ?? -1);
+  const totalProcessed = Number(progress.total_processed_candidates || -1);
+  return [gameIndex, processed, totalProcessed];
+}
+
+function compareProgressCursor(a, b) {
+  const left = progressCursor(a);
+  const right = progressCursor(b);
+  for (let i = 0; i < left.length; i++) {
+    if (left[i] !== right[i]) return left[i] - right[i];
+  }
+  return 0;
+}
+
+function extractGeoNamesAlternateNames(value) {
+  const out = [];
+  const visit = (item) => {
+    if (item === null || item === undefined) return;
+    if (Array.isArray(item)) {
+      for (const child of item) visit(child);
+      return;
+    }
+    if (typeof item === 'object') {
+      let matchedKnownField = false;
+      for (const key of ['name', 'asciiName', 'toponymName', 'alternateName', 'value', 'label']) {
+        if (item[key] !== undefined && item[key] !== null) {
+          matchedKnownField = true;
+          visit(item[key]);
+        }
+      }
+      if (!matchedKnownField) {
+        for (const child of Object.values(item)) {
+          if (typeof child === 'string' || typeof child === 'number' || Array.isArray(child)) visit(child);
+        }
+      }
+      return;
+    }
+    const text = clean(item);
+    if (!text) return;
+    for (const part of text.split(',')) {
+      const normalized = clean(part);
+      if (normalized) out.push(normalized);
+    }
+  };
+  visit(value);
+  return unique(out);
 }
 
 function parseArgs(argv) {
@@ -100,6 +185,42 @@ function writeCompletionStatus(outFile, payload) {
   }
 }
 
+function hasUsableFile(file, minBytes = 2) {
+  try {
+    return Boolean(file && fs.existsSync(file) && fs.statSync(file).isFile() && fs.statSync(file).size >= minBytes);
+  } catch (_err) {
+    return false;
+  }
+}
+
+function verifyPhase2Finalization({
+  outXlsx,
+  outSummary,
+  outCollision,
+  outAudit,
+  outDebugRows,
+  outCheckpoint,
+  outProgress,
+}) {
+  const checkpoint = readJsonSafe(outCheckpoint);
+  const progress = readJsonSafe(outProgress);
+  const checks = {
+    final_xlsx: hasUsableFile(outXlsx, 1024),
+    summary_json: hasUsableFile(outSummary),
+    collision_json: hasUsableFile(outCollision),
+    audit_json: hasUsableFile(outAudit),
+    debug_rows_json: hasUsableFile(outDebugRows),
+    checkpoint_finalized: Boolean(checkpoint && checkpoint.finalized === true),
+    progress_finalized: Boolean(progress && progress.finalized === true),
+  };
+  return {
+    ok: Object.values(checks).every(Boolean),
+    checks,
+    checkpoint_finalized_at: checkpoint && checkpoint.finalized_at ? checkpoint.finalized_at : '',
+    progress_finalized_at: progress && progress.finalized_at ? progress.finalized_at : '',
+  };
+}
+
 function requestWindowsForcedShutdown({ delaySeconds, comment }) {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') {
@@ -137,7 +258,19 @@ function requestWindowsForcedShutdown({ delaySeconds, comment }) {
   });
 }
 
-function startConditionalShutdownWatcher({ watchPid, completionFile, outXlsx, delaySeconds, comment }) {
+function startConditionalShutdownWatcher({
+  watchPid,
+  completionFile,
+  outXlsx,
+  outSummary,
+  outCollision,
+  outAudit,
+  outDebugRows,
+  outCheckpoint,
+  outProgress,
+  delaySeconds,
+  comment,
+}) {
   if (process.platform !== 'win32') {
     return { ok: false, requested: false, reason: `unsupported_platform:${process.platform}` };
   }
@@ -156,6 +289,12 @@ function startConditionalShutdownWatcher({ watchPid, completionFile, outXlsx, de
       '--watch-pid', String(watchPid),
       '--completion', completionFile,
       '--out-xlsx', outXlsx,
+      '--out-summary', outSummary,
+      '--out-collision', outCollision,
+      '--out-audit', outAudit,
+      '--out-debug-rows', outDebugRows,
+      '--out-checkpoint', outCheckpoint,
+      '--out-progress', outProgress,
       '--status-file', watcherStatusFile,
       '--delay-seconds', String(safeDelaySeconds),
       '--comment', safeComment,
@@ -1755,8 +1894,8 @@ function featureRank(row) {
 
 function geonamesNameMatchType(query, row) {
   const q = normalizeGeocoderQuery(query);
-  const names = unique([row.name, row.toponymName]
-    .concat(Array.isArray(row.alternateNames) ? row.alternateNames : [])
+  const names = unique([row.name, row.toponymName, row.asciiName]
+    .concat(extractGeoNamesAlternateNames(row.alternateNames))
     .map((x) => normalizeGeocoderQuery(x))
     .filter(Boolean));
   if (names.some((n) => n === q)) return 'exact';
@@ -1768,7 +1907,7 @@ function geonamesNameMatchType(query, row) {
 function geonamesConfidence(query, row, rankIndex = 0) {
   const q = normalizeGeocoderQuery(query);
   const names = [row.name, row.toponymName, row.asciiName]
-    .concat(String(row.alternateNames || '').split(','))
+    .concat(extractGeoNamesAlternateNames(row.alternateNames))
     .map((x) => normalizeGeocoderQuery(x))
     .filter(Boolean);
   let base = 0.50;
@@ -3515,6 +3654,10 @@ function resolveCollisions(rows) {
       manual_review_dropped_activity: 0,
       manual_review_rows: 0,
       output_rows: 0,
+      phase2_resume_enabled: 0,
+      phase2_resume_source: '',
+      phase2_full_checkpoint_every_candidate: 1,
+      phase2_progress_cursor_is_advisory_only: 1,
       external_geocoder_enabled: externalGeocoder.enabled ? 1 : 0,
       external_geocoder_enable_source: externalGeocoder.enable_source || '',
       external_geocoder_attempted: 0,
@@ -3613,17 +3756,39 @@ function resolveCollisions(rows) {
         shutdown_delay_seconds: shutdownDelaySeconds,
       }),
     });
-    const resumeRequested = args.resume === 'true' || args['resume-from-checkpoint'] === 'true';
-    const resumeState = resumeRequested && fs.existsSync(outCheckpoint)
-      ? JSON.parse(fs.readFileSync(outCheckpoint, 'utf8'))
+    const resumeRaw = args.resume ?? args['resume-from-checkpoint'];
+    const explicitResume = resumeRaw === undefined ? null : boolLike(resumeRaw, false);
+    const freshStart = boolLike(args['fresh-start'] ?? args.fresh ?? config.phase2_fresh_start, false);
+    const autoResumeEnabled = boolLike(config.phase2_auto_resume, true);
+    const checkpointCandidate = readJsonSafe(outCheckpoint);
+    const checkpointMatchesRun = Boolean(
+      checkpointCandidate
+      && checkpointCandidate.finalized !== true
+      && sameResolvedPath(checkpointCandidate.index_file || indexFile, indexFile)
+    );
+    const resumeRequested = !freshStart
+      && checkpointMatchesRun
+      && (explicitResume === true || (explicitResume === null && autoResumeEnabled));
+    const resumeState = resumeRequested ? checkpointCandidate : null;
+    const progressFileState = resumeRequested ? readJsonSafe(outProgress) : null;
+    const progressFileMatchesRun = Boolean(
+      progressFileState
+      && sameResolvedPath(progressFileState.index_file || indexFile, indexFile)
+      && progressFileState.progress
+    );
+    const checkpointProgress = resumeState && resumeState.progress ? resumeState.progress : null;
+    // V6.0 safety rule: never advance beyond the cursor stored with the full row payload.
+    // phase2_progress.json is observational only; it cannot move the recovery cursor forward.
+    const resumeProgress = checkpointProgress || {};
+    const resumeStats = resumeState && resumeState.stats && typeof resumeState.stats === 'object'
+      ? resumeState.stats
       : null;
-    const resumeProgress = resumeState && resumeState.progress ? resumeState.progress : null;
     if (resumeState) {
       for (const row of (Array.isArray(resumeState.staged_rows) ? resumeState.staged_rows : [])) stagedRows.push(row);
       for (const row of (Array.isArray(resumeState.manual_review_rows) ? resumeState.manual_review_rows : [])) manualReviewRows.push(row);
-      if (resumeState.stats && typeof resumeState.stats === 'object') {
-        Object.assign(stats, resumeState.stats);
-      }
+      if (resumeStats) Object.assign(stats, resumeStats);
+      stats.phase2_resume_enabled = 1;
+      stats.phase2_resume_source = 'full_autosave_checkpoint';
       currentGameName = resumeProgress.current_game_name || '';
       currentGameIndex = Number(resumeProgress.current_game_index || -1);
       currentCandidateIndex = Number(resumeProgress.current_candidate_index || -1);
@@ -3632,6 +3797,21 @@ function resolveCollisions(rows) {
       lastCandidateStatus = resumeProgress.last_candidate_status || 'resume';
       lastCheckpointAt = resumeProgress.last_checkpoint_at || '';
       currentGameBreakdown = resumeProgress.current_game_breakdown || null;
+      console.log(JSON.stringify({
+        phase2_resume: true,
+        source: stats.phase2_resume_source,
+        game: currentGameName,
+        game_index: currentGameIndex,
+        processed_in_game: Number((currentGameBreakdown || {}).processed || 0),
+        total_processed_candidates: totalProcessedCandidates,
+        staged_rows: stagedRows.length,
+        manual_review_rows: manualReviewRows.length,
+      }));
+    } else {
+      stats.phase2_resume_enabled = 0;
+      stats.phase2_resume_source = freshStart
+        ? 'fresh_start_requested'
+        : (checkpointCandidate && checkpointCandidate.finalized === true ? 'checkpoint_finalized' : 'no_recoverable_checkpoint');
     }
 
     const makePartialRows = () => {
@@ -3664,7 +3844,7 @@ function resolveCollisions(rows) {
         last_candidate_status: lastCandidateStatus,
         last_checkpoint_at: lastCheckpointAt,
         current_game_breakdown: currentGameBreakdown,
-        autosave_mode: 'progress_json_every_candidate_xlsx_on_accepted_row',
+        autosave_mode: 'full_json_every_candidate_xlsx_on_accepted_row',
         partial_xlsx_rows_saved: stagedRows.length,
         ...meta,
       };
@@ -3672,11 +3852,12 @@ function resolveCollisions(rows) {
       // Tiny progress file: written for every candidate. This is the file to watch during long phase-2 runs.
       writeJsonAtomic(outProgress, {
         checkpoint_kind: 'facebook_group_monitor_phase2_progress',
-        checkpoint_version: 3,
+        checkpoint_version: 4,
         updated_at: now,
         index_file: indexFile,
         run_dir: path.dirname(indexFile),
         progress,
+        stats,
         outputs: {
           progress: outProgress,
           partial_xlsx: outPartialXlsx,
@@ -3698,13 +3879,13 @@ function resolveCollisions(rows) {
         stats,
       });
 
-      // Full recovery state is much larger because it contains accepted rows and manual-review rows.
-      // Write it only at accepted-row / game-boundary / emergency checkpoints, not for every rejected candidate.
+      // V6.0 writes the complete recoverable payload after every candidate.
+      // This keeps detail rows, manual-review rows, stats and cursor in one atomic checkpoint.
       if (shouldWriteFullState) {
         const checkpoint = {
-          checkpoint_version: 3,
+          checkpoint_version: 4,
           checkpoint_kind: 'facebook_group_monitor_phase2_autosave',
-          autosave_mode: 'progress_json_every_candidate_xlsx_on_accepted_row',
+          autosave_mode: 'full_json_every_candidate_xlsx_on_accepted_row',
           finalized: false,
           updated_at: now,
           index_file: indexFile,
@@ -3767,7 +3948,11 @@ function resolveCollisions(rows) {
       currentCandidateTotal = candidates.length;
       const resumeCurrentGame = resumeProgress && currentGameIndex === Number(resumeProgress.current_game_index || -1);
       const resumeStartIndex = resumeCurrentGame
-        ? Math.min(candidates.length, Math.max(0, Number((resumeProgress.current_game_breakdown || {}).processed || resumeProgress.total_processed_candidates || 0)))
+        ? Math.min(candidates.length, Math.max(0, Number(
+          (resumeProgress.current_game_breakdown || {}).processed
+          ?? resumeProgress.current_candidate_index
+          ?? 0
+        )))
         : 0;
       currentCandidateIndex = resumeStartIndex;
 
@@ -3782,27 +3967,30 @@ function resolveCollisions(rows) {
       for (let i = resumeStartIndex; i < candidates.length; i++) {
         const c = candidates[i];
         const candidateStartedAt = Date.now();
-        currentCandidateIndex = i + 1;
+        // currentCandidateIndex is the count of fully durable candidates. Keep it at i while
+        // candidate i is in flight, so an emergency checkpoint reruns an incomplete candidate.
+        currentCandidateIndex = i;
         let candidateCheckpointWritten = false;
         const markCandidateCheckpoint = (status, extra = {}) => {
           if (!candidateCheckpointWritten) {
             totalProcessedCandidates++;
             one.processed++;
+            currentCandidateIndex = i + 1;
             candidateCheckpointWritten = true;
           }
           lastCandidateStatus = status;
-          if (totalProcessedCandidates % checkpointEveryCandidate === 0 || status === 'accepted') {
-            writePartialCheckpoint({
-              stage: 'candidate_processed',
-              status,
-              current_group_url: c.group_url || '',
-              current_group_name: c.group_name || '',
-              ...extra,
-            }, {
-              writeXlsx: status === 'accepted',
-              writeFullState: status === 'accepted',
-            });
-          }
+          // V6.0 durability: persist the complete row payload and cursor after every candidate,
+          // including rejected and manual-review candidates. The partial workbook remains accepted-row only.
+          writePartialCheckpoint({
+            stage: 'candidate_processed',
+            status,
+            current_group_url: c.group_url || '',
+            current_group_name: c.group_name || '',
+            ...extra,
+          }, {
+            writeXlsx: status === 'accepted',
+            writeFullState: true,
+          });
         };
         const cardMembers = toInt(c.card_group_size);
         if (!(typeof cardMembers === 'number' && Number.isFinite(cardMembers) && cardMembers >= 100)) {
@@ -4096,20 +4284,30 @@ function resolveCollisions(rows) {
 
     const summary = buildSummary(finalRows);
     stats.output_rows = finalRows.length;
+    writeJsonAtomic(outSummary, { summary, stats });
+    writeJsonAtomic(outCollision, resolved.report);
+    writeJsonAtomic(outAudit, stats);
+    writeJsonAtomic(outDebugRows, debugRows);
+
     const finalCheckpoint = fs.existsSync(outCheckpoint) ? JSON.parse(fs.readFileSync(outCheckpoint, 'utf8')) : {};
+    finalCheckpoint.checkpoint_version = 4;
     finalCheckpoint.finalized = true;
     finalCheckpoint.finalized_at = new Date().toISOString();
     finalCheckpoint.summary = summary;
+    finalCheckpoint.stats = stats;
+    finalCheckpoint.staged_rows = stagedRows;
+    finalCheckpoint.manual_review_rows = manualReviewRows;
     finalCheckpoint.progress = {
       ...(finalCheckpoint.progress || {}),
       stage: 'finalized',
       output_rows: finalRows.length,
+      manual_review_rows: manualReviewRows.length,
       dropped_collision: resolved.droppedCollision,
     };
     writeJsonAtomic(outCheckpoint, finalCheckpoint);
     writeJsonAtomic(outProgress, {
       checkpoint_kind: 'facebook_group_monitor_phase2_progress',
-      checkpoint_version: 3,
+      checkpoint_version: 4,
       finalized: true,
       finalized_at: finalCheckpoint.finalized_at,
       index_file: indexFile,
@@ -4118,14 +4316,25 @@ function resolveCollisions(rows) {
       summary,
       stats,
     });
-    writeJsonAtomic(outSummary, { summary, stats });
-    writeJsonAtomic(outCollision, resolved.report);
-    writeJsonAtomic(outAudit, stats);
-    writeJsonAtomic(outDebugRows, debugRows);
+
+    const finalizationVerification = verifyPhase2Finalization({
+      outXlsx,
+      outSummary,
+      outCollision,
+      outAudit,
+      outDebugRows,
+      outCheckpoint,
+      outProgress,
+    });
+    if (!finalizationVerification.ok) {
+      throw new Error(`Phase-2 finalization verification failed: ${JSON.stringify(finalizationVerification.checks)}`);
+    }
     finalReportGenerated = true;
     writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
       status: 'completed_report_generated',
       final_report_generated: true,
+      phase2_finalization_verified: true,
+      finalization_verification: finalizationVerification,
       report_created: fs.existsSync(outXlsx),
       chrome_closed: false,
       shutdown_requested: false,
@@ -4172,6 +4381,7 @@ function resolveCollisions(rows) {
       writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
         status: 'completed',
         final_report_generated: true,
+        phase2_finalization_verified: true,
         report_created: fs.existsSync(outXlsx),
         chrome_closed: chromeClosed,
         chrome_close_result: chromeCloseResult,
@@ -4198,21 +4408,17 @@ function resolveCollisions(rows) {
             watchPid: process.pid,
             completionFile: outCompletion,
             outXlsx,
+            outSummary,
+            outCollision,
+            outAudit,
+            outDebugRows,
+            outCheckpoint,
+            outProgress,
             delaySeconds: shutdownDelaySeconds,
             comment: 'FB group monitoring finished. System will shut down.',
           });
-          if (!shutdownResult.ok) {
-            const watcherFailure = shutdownResult;
-            const directFallback = await requestWindowsForcedShutdown({
-              delaySeconds: shutdownDelaySeconds,
-              comment: 'FB group monitoring finished. System will shut down.',
-            });
-            shutdownResult = {
-              ...directFallback,
-              watcher_fallback: true,
-              watcher_failure: watcherFailure,
-            };
-          }
+          // V6.0 intentionally has no direct shutdown fallback. If the validated watcher
+          // cannot start, the machine remains on rather than risking shutdown after a partial run.
         }
         writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
           status: shutdownResult.ok
@@ -4221,6 +4427,7 @@ function resolveCollisions(rows) {
               : 'completed_forced_shutdown_scheduled')
             : 'completed_shutdown_not_scheduled',
           final_report_generated: true,
+          phase2_finalization_verified: true,
           report_created: fs.existsSync(outXlsx),
           chrome_closed: chromeClosed,
           chrome_close_result: chromeCloseResult,
