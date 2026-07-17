@@ -15,8 +15,14 @@
   [switch]$NoPowerGuard,
   [int]$PowerGuardPollSeconds = 5,
   [int]$ChromeStartTimeoutSeconds = 180,
+  [int]$SchedulerStartupTimeoutSeconds = 45,
   [string]$ScheduledTaskName = "",
   [switch]$ShutdownAfterComplete,
+  [string]$ShutdownBefore = "",
+  [ValidateSet("auto", "none", "after_complete", "before_deadline")]
+  [string]$ShutdownMode = "auto",
+  [string]$ShutdownDeadline = "",
+  [string]$ShutdownInstruction = "",
   [int]$ShutdownDelaySeconds = 60
 )
 
@@ -31,7 +37,157 @@ function Add-QuotedArg([System.Collections.Generic.List[string]]$List, [string]$
   $List.Add((Quote-PSString $Value)) | Out-Null
 }
 
+function Write-JsonAtomic([string]$Path, $Payload) {
+  $dir = Split-Path -Parent $Path
+  if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+  $tmp = "$Path.tmp-$PID-$(Get-Date -Format 'yyyyMMddHHmmssfff')"
+  $Payload | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $tmp -Encoding UTF8
+  Move-Item -Force -LiteralPath $tmp -Destination $Path
+}
+
+function ConvertTo-NativeQuotedArgument([string]$Value) {
+  if ($null -eq $Value) { return '""' }
+  $text = [string]$Value
+  if ($text -notmatch '[\s"]') { return $text }
+  $builder = New-Object System.Text.StringBuilder
+  [void]$builder.Append('"')
+  $backslashes = 0
+  foreach ($ch in $text.ToCharArray()) {
+    if ($ch -eq '\') { $backslashes++; continue }
+    if ($ch -eq '"') {
+      [void]$builder.Append(('\' * (($backslashes * 2) + 1)))
+      [void]$builder.Append('"')
+      $backslashes = 0
+      continue
+    }
+    if ($backslashes -gt 0) { [void]$builder.Append(('\' * $backslashes)); $backslashes = 0 }
+    [void]$builder.Append($ch)
+  }
+  if ($backslashes -gt 0) { [void]$builder.Append(('\' * ($backslashes * 2))) }
+  [void]$builder.Append('"')
+  return $builder.ToString()
+}
+
+function Start-HiddenPowerShellProcess([string]$ScriptPath) {
+  $powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  if (-not (Test-Path -LiteralPath $powerShellExe)) { $powerShellExe = 'powershell.exe' }
+  $parts = @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',$ScriptPath) |
+    ForEach-Object { ConvertTo-NativeQuotedArgument ([string]$_) }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $powerShellExe
+  $psi.Arguments = ($parts -join ' ')
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $psi
+  if (-not $process.Start()) { throw "无法启动隐藏 PowerShell：$ScriptPath" }
+  return $process
+}
+
+function Get-RunnerHealth([string]$RunnerStatusPath) {
+  $result = [ordered]@{ healthy = $false; observed = $false; terminal = $false; status = 'missing'; runner_pid = $null; process_alive = $false; payload = $null }
+  if (-not (Test-Path -LiteralPath $RunnerStatusPath)) { return [pscustomobject]$result }
+  try {
+    $payload = Get-Content -Raw -LiteralPath $RunnerStatusPath | ConvertFrom-Json
+    $result.payload = $payload
+    $result.observed = $true
+    $result.status = [string]$payload.status
+    if ($payload.runner_pid) {
+      $result.runner_pid = [int]$payload.runner_pid
+      $result.process_alive = $null -ne (Get-Process -Id ([int]$payload.runner_pid) -ErrorAction SilentlyContinue)
+    }
+    $result.healthy = $result.process_alive -and ($result.status -in @('starting','phase2_running'))
+    $result.terminal = $result.status -in @('finished_success','finished_error','runner_error','already_completed_noop','duplicate_instance_ignored')
+  } catch {
+    $result.status = 'invalid_status_json'
+  }
+  return [pscustomobject]$result
+}
+
+function Remove-ScheduledTaskRobust([string]$Name) {
+  try { Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue } catch {}
+  try { Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+  try { & schtasks.exe /Delete /TN $Name /F *> $null } catch {}
+}
+
+
+function Stop-StaleLauncherChildFromTrace([string]$TracePath) {
+  if (-not (Test-Path -LiteralPath $TracePath)) { return }
+  try {
+    $lines = @(Get-Content -LiteralPath $TracePath -Tail 50)
+    $pidMatches = New-Object System.Collections.Generic.List[int]
+    foreach ($line in $lines) {
+      if ([string]$line -match 'wmi_child_started pid=(\d+)') { $pidMatches.Add([int]$Matches[1]) | Out-Null }
+    }
+    foreach ($childPid in ($pidMatches | Select-Object -Unique)) {
+      $runnerHealth = Get-RunnerHealth (Join-Path (Split-Path -Parent $TracePath) 'scheduled_phase2_runner_status.json')
+      if (-not $runnerHealth.healthy -and (Get-Process -Id $childPid -ErrorAction SilentlyContinue)) {
+        Stop-Process -Id $childPid -Force -ErrorAction SilentlyContinue
+      }
+    }
+  } catch {}
+}
+
+function Wait-ForRunnerStart([string]$RunnerStatusPath, [string]$BootstrapStatusPath, [int]$TimeoutSeconds) {
+  $deadline = (Get-Date).AddSeconds([Math]::Max(10, $TimeoutSeconds))
+  $lastBootstrap = $null
+  while ((Get-Date) -lt $deadline) {
+    $health = Get-RunnerHealth $RunnerStatusPath
+    if ($health.healthy -or $health.terminal) { return [pscustomobject]@{ started = $true; health = $health; bootstrap = $lastBootstrap } }
+    if (Test-Path -LiteralPath $BootstrapStatusPath) {
+      try {
+        $lastBootstrap = Get-Content -Raw -LiteralPath $BootstrapStatusPath | ConvertFrom-Json
+        if ([string]$lastBootstrap.status -eq 'bootstrap_error') {
+          return [pscustomobject]@{ started = $false; health = $health; bootstrap = $lastBootstrap }
+        }
+      } catch {}
+    }
+    Start-Sleep -Seconds 1
+  }
+  return [pscustomobject]@{ started = $false; health = (Get-RunnerHealth $RunnerStatusPath); bootstrap = $lastBootstrap }
+}
+
+function Set-ManifestLauncherMode([string]$ManifestPath, [string]$Mode) {
+  try {
+    $payload = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json
+    $payload.launcher_mode = $Mode
+    $payload.launcher_mode_updated_at = (Get-Date).ToString('o')
+    Write-JsonAtomic $ManifestPath $payload
+  } catch {}
+}
+
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+
+# V6.2.2: shutdown intent is resolved from the current Codex prompt into a run-local
+# shutdown_policy.json. The user never needs to edit task_config.json or a fixed date.
+$legacyDeadline = if (-not [string]::IsNullOrWhiteSpace($ShutdownDeadline)) { $ShutdownDeadline } else { $ShutdownBefore }
+$ResolvedShutdownMode = ([string]$ShutdownMode).Trim().ToLowerInvariant()
+if ($ResolvedShutdownMode -eq 'auto') {
+  if (-not [string]::IsNullOrWhiteSpace($legacyDeadline)) {
+    $ResolvedShutdownMode = 'before_deadline'
+  } elseif ([bool]$ShutdownAfterComplete) {
+    $ResolvedShutdownMode = 'after_complete'
+  } else {
+    $ResolvedShutdownMode = 'none'
+  }
+}
+
+$ShutdownBefore = ''
+if ($ResolvedShutdownMode -eq 'before_deadline') {
+  if ([string]::IsNullOrWhiteSpace($legacyDeadline)) {
+    throw "ShutdownMode=before_deadline 时必须提供 -ShutdownDeadline（或兼容参数 -ShutdownBefore），且时间必须带时区。"
+  }
+  try { $ShutdownBefore = ([DateTimeOffset]::Parse($legacyDeadline)).ToString('o') }
+  catch { throw "-ShutdownDeadline 必须是带时区的 ISO 8601 时间，格式如 YYYY-MM-DDTHH:mm:ss+08:00。" }
+} elseif ($ResolvedShutdownMode -eq 'after_complete') {
+  $ShutdownBefore = ''
+} elseif ($ResolvedShutdownMode -eq 'none') {
+  $ShutdownBefore = ''
+} else {
+  throw "不支持的 ShutdownMode：$ResolvedShutdownMode"
+}
+$EffectiveShutdownAfterComplete = $ResolvedShutdownMode -in @('after_complete', 'before_deadline')
 
 if ([string]::IsNullOrWhiteSpace($RunDir)) {
   if ($Task -eq "phase2" -and -not [string]::IsNullOrWhiteSpace($Index)) {
@@ -42,12 +198,30 @@ if ([string]::IsNullOrWhiteSpace($RunDir)) {
   }
 }
 
-
 $RunDir = (Resolve-Path (New-Item -ItemType Directory -Force -Path $RunDir)).Path
 
-# V6.0: phase2 background tasks use Windows Task Scheduler by default.
-# The task has an immediate trigger plus an AtLogOn trigger, so a Windows restart can resume the same run.
-# The scheduled runner self-deletes the task after every normal execution end.
+$ShutdownPolicyFile = Join-Path $RunDir 'shutdown_policy.json'
+$shutdownPolicyPayload = [ordered]@{
+  policy_kind = 'facebook_group_monitor_shutdown_policy'
+  policy_version = 1
+  mode = $ResolvedShutdownMode
+  enabled = [bool]$EffectiveShutdownAfterComplete
+  deadline = $ShutdownBefore
+  delay_seconds = [Math]::Max(0, $ShutdownDelaySeconds)
+  force_apps = [bool]$EffectiveShutdownAfterComplete
+  default_when_unspecified = 'none'
+  source = if (-not [string]::IsNullOrWhiteSpace($ShutdownInstruction)) { 'codex_natural_language_prompt' } else { 'codex_cli_resolution' }
+  user_instruction = $ShutdownInstruction
+  resolved_at = (Get-Date).ToString('o')
+  note = 'This file is generated automatically from the user instruction in the Codex text box. The user should not edit it manually.'
+}
+Write-JsonAtomic $ShutdownPolicyFile $shutdownPolicyPayload
+
+# V6.2: phase2 defaults to a resilient, fully hidden Task Scheduler chain.
+# A generated one-argument bootstrap removes V6.1's multi-layer quoting failure.
+# Startup is actively verified. A stuck WScript task is removed and retried with a
+# direct hidden Task Scheduler action; if that also fails, a hidden direct process
+# starts from the same complete checkpoint rather than silently doing nothing.
 if ($Task -eq "phase2" -and -not $DirectBackground) {
   if ([string]::IsNullOrWhiteSpace($Index)) {
     $candidateIndex = Join-Path $RunDir "phase1_index.json"
@@ -63,9 +237,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
       $bytes = [System.Text.Encoding]::UTF8.GetBytes($RunDir.ToLowerInvariant())
       $hash = ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').Substring(0, 16)
       $ScheduledTaskName = "FBGroupMonitor_Phase2_$hash"
-    } finally {
-      $sha.Dispose()
-    }
+    } finally { $sha.Dispose() }
   }
 
   $tsScheduled = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -74,27 +246,46 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
   $StatusFile = Join-Path $RunDir "background_task.json"
   $Manifest = Join-Path $RunDir "scheduled_phase2_manifest.json"
   $Runner = Join-Path $RootDir "scripts\scheduled_phase2_runner.ps1"
+  $RunnerStatus = Join-Path $RunDir "scheduled_phase2_runner_status.json"
+  $BootstrapStatus = Join-Path $RunDir "scheduled_phase2_bootstrap_status.json"
+  $LauncherTrace = Join-Path $RunDir "scheduled_phase2_launcher_trace.log"
+  $SchedulerDiagnostic = Join-Path $RunDir "scheduled_phase2_startup_diagnostic.json"
+  $Bootstrap = Join-Path $RunDir "scheduled_phase2_bootstrap_$tsScheduled.ps1"
   if (-not (Test-Path -LiteralPath $Runner)) { throw "缺少任务计划程序执行器：$Runner" }
 
   $existingTask = Get-ScheduledTask -TaskName $ScheduledTaskName -ErrorAction SilentlyContinue
   if ($existingTask -and $existingTask.State -eq 'Running') {
-    $existingStatus = [ordered]@{
-      task = $Task
-      launch_mode = "windows_task_scheduler"
-      scheduled_task_name = $ScheduledTaskName
-      status = "already_running"
-      run_dir = $RunDir
-      started_at = (Get-Date).ToString("o")
-      note = "同一 RunDir 的任务计划程序实例正在运行，未覆盖 manifest，也未创建重复实例。"
+    $existingHealth = Get-RunnerHealth $RunnerStatus
+    if (-not $existingHealth.healthy) {
+      Start-Sleep -Seconds 5
+      $existingHealth = Get-RunnerHealth $RunnerStatus
     }
-    $existingStatus | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $StatusFile -Encoding UTF8
-    $existingStatus | ConvertTo-Json -Depth 5
-    exit 0
+    if ($existingHealth.healthy) {
+      $existingStatus = [ordered]@{
+        task = $Task
+        launch_mode = 'windows_task_scheduler'
+        scheduled_task_name = $ScheduledTaskName
+        status = 'already_running_verified'
+        runner_pid = $existingHealth.runner_pid
+        run_dir = $RunDir
+        started_at = (Get-Date).ToString('o')
+        note = '检测到存活的 runner 进程，未覆盖 manifest，也未创建重复实例。'
+      }
+      Write-JsonAtomic $StatusFile $existingStatus
+      $existingStatus | ConvertTo-Json -Depth 7
+      exit 0
+    }
+    # V6.1 could leave WScript in Running while no runner existed. Do not treat it as healthy.
+    Remove-ScheduledTaskRobust $ScheduledTaskName
+  } elseif ($existingTask) {
+    Remove-ScheduledTaskRobust $ScheduledTaskName
   }
+
+  Remove-Item -Force -LiteralPath $RunnerStatus,$BootstrapStatus,$LauncherTrace,$SchedulerDiagnostic -ErrorAction SilentlyContinue
 
   $manifestPayload = [ordered]@{
     manifest_kind = "facebook_group_monitor_scheduled_phase2"
-    manifest_version = 1
+    manifest_version = 5
     root_dir = $RootDir
     run_dir = $RunDir
     index = $Index
@@ -104,11 +295,21 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     progress_report_every_minutes = $ProgressReportEveryMinutes
     no_close_chrome = [bool]$NoCloseChrome
     fresh_start = [bool]$FreshStart
-    shutdown_after_complete = [bool]$ShutdownAfterComplete
+    shutdown_mode = $ResolvedShutdownMode
+    shutdown_policy_file = $ShutdownPolicyFile
+    shutdown_instruction = $ShutdownInstruction
+    shutdown_after_complete = [bool]$EffectiveShutdownAfterComplete
+    shutdown_before = $ShutdownBefore
     shutdown_delay_seconds = $ShutdownDelaySeconds
     enable_power_guard = [bool](-not $NoPowerGuard)
     power_guard_poll_seconds = [Math]::Max(2, $PowerGuardPollSeconds)
     chrome_start_timeout_seconds = [Math]::Max(30, $ChromeStartTimeoutSeconds)
+    scheduler_startup_timeout_seconds = [Math]::Max(10, $SchedulerStartupTimeoutSeconds)
+    launcher_mode = 'wscript_wmi_windowless'
+    bootstrap_script = $Bootstrap
+    bootstrap_status = $BootstrapStatus
+    launcher_trace = $LauncherTrace
+    scheduler_diagnostic = $SchedulerDiagnostic
     stdout_log = $StdoutLog
     stderr_log = $StderrLog
     out_xlsx = (Join-Path $RunDir "fb_monitoring_filtered.xlsx")
@@ -118,11 +319,33 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     out_debug_rows = (Join-Path $RunDir "debug_rows.json")
     created_at = (Get-Date).ToString("o")
   }
-  $manifestPayload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Manifest -Encoding UTF8
+  Write-JsonAtomic $Manifest $manifestPayload
+
+  $bootstrapLines = New-Object System.Collections.Generic.List[string]
+  $bootstrapLines.Add('$ErrorActionPreference = ''Stop''') | Out-Null
+  $bootstrapLines.Add(('$statusPath = ' + (Quote-PSString $BootstrapStatus))) | Out-Null
+  $bootstrapLines.Add(('$stderrPath = ' + (Quote-PSString $StderrLog))) | Out-Null
+  $bootstrapLines.Add('function Write-BootstrapStatus([string]$Status, [string]$ErrorMessage = '''') {') | Out-Null
+  $bootstrapLines.Add('  $payload = [ordered]@{ status=$Status; bootstrap_pid=$PID; updated_at=(Get-Date).ToString(''o''); error=$ErrorMessage }') | Out-Null
+  $bootstrapLines.Add('  $tmp = "$statusPath.tmp-$PID"; $payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $tmp -Encoding UTF8; Move-Item -Force -LiteralPath $tmp -Destination $statusPath') | Out-Null
+  $bootstrapLines.Add('}') | Out-Null
+  $bootstrapLines.Add('Write-BootstrapStatus ''bootstrap_started''') | Out-Null
+  $bootstrapLines.Add('try {') | Out-Null
+  $bootstrapLines.Add(('  & ' + (Quote-PSString $Runner) + ' -Manifest ' + (Quote-PSString $Manifest) + ' -TaskName ' + (Quote-PSString $ScheduledTaskName))) | Out-Null
+  $bootstrapLines.Add('  exit $LASTEXITCODE') | Out-Null
+  $bootstrapLines.Add('} catch {') | Out-Null
+  $bootstrapLines.Add('  $message = $_.Exception.ToString(); Add-Content -LiteralPath $stderrPath -Value "[bootstrap] fatal_at=$((Get-Date).ToString(''o''))`n$message"; Write-BootstrapStatus ''bootstrap_error'' $message; exit 1') | Out-Null
+  $bootstrapLines.Add('}') | Out-Null
+  Set-Content -LiteralPath $Bootstrap -Value ($bootstrapLines -join [Environment]::NewLine) -Encoding UTF8
 
   $userId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-  $argString = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Runner`" -Manifest `"$Manifest`" -TaskName `"$ScheduledTaskName`""
-  $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argString -WorkingDirectory $RootDir
+  $HiddenLauncher = Join-Path $RootDir "scripts\hidden_powershell_launcher.vbs"
+  if (-not (Test-Path -LiteralPath $HiddenLauncher)) { throw "缺少无窗口启动器：$HiddenLauncher" }
+  $WscriptExe = Join-Path $env:SystemRoot "System32\wscript.exe"
+  if (-not (Test-Path -LiteralPath $WscriptExe)) { $WscriptExe = "wscript.exe" }
+  $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  if (-not (Test-Path -LiteralPath $PowerShellExe)) { $PowerShellExe = 'powershell.exe' }
+
   $triggers = @(
     (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5)),
     (New-ScheduledTaskTrigger -AtLogOn -User $userId)
@@ -135,22 +358,104 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     -ExecutionTimeLimit ([TimeSpan]::Zero)
   $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
 
-  # Reusing the same RunDir replaces only a non-running stale task with the deterministic name.
-  if ($existingTask) {
-    Unregister-ScheduledTask -TaskName $ScheduledTaskName -Confirm:$false -ErrorAction SilentlyContinue
+  function Register-AndStartPhase2Task([string]$LauncherMode) {
+    if ($LauncherMode -eq 'wscript_wmi_windowless') {
+      $arguments = "//B //Nologo `"$HiddenLauncher`" `"$Bootstrap`" `"$LauncherTrace`" `"$ScheduledTaskName`""
+      $action = New-ScheduledTaskAction -Execute $WscriptExe -Argument $arguments -WorkingDirectory $RootDir
+    } else {
+      $arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Bootstrap`""
+      $action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument $arguments -WorkingDirectory $RootDir
+    }
+    Register-ScheduledTask -TaskName $ScheduledTaskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description "Facebook Group Monitor phase 2 V6.2; verified startup; reboot-resumable; self-deletes after execution." -Force | Out-Null
+    Start-ScheduledTask -TaskName $ScheduledTaskName
   }
-  Register-ScheduledTask -TaskName $ScheduledTaskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description "Facebook Group Monitor phase 2; reboot-resumable; self-deletes after execution." -Force | Out-Null
-  Start-ScheduledTask -TaskName $ScheduledTaskName
+
+  $attempts = New-Object System.Collections.Generic.List[object]
+  Register-AndStartPhase2Task 'wscript_wmi_windowless'
+  $first = Wait-ForRunnerStart $RunnerStatus $BootstrapStatus $SchedulerStartupTimeoutSeconds
+  $attempts.Add([ordered]@{
+    mode = 'wscript_wmi_windowless'
+    started = [bool]$first.started
+    checked_at = (Get-Date).ToString('o')
+    bootstrap = $first.bootstrap
+    runner = $first.health
+  }) | Out-Null
+
+  $effectiveMode = 'wscript_wmi_windowless'
+  $fallbackProcess = $null
+  if (-not $first.started) {
+    Remove-ScheduledTaskRobust $ScheduledTaskName
+    Stop-StaleLauncherChildFromTrace $LauncherTrace
+    Remove-Item -Force -LiteralPath $RunnerStatus,$BootstrapStatus -ErrorAction SilentlyContinue
+    Set-ManifestLauncherMode $Manifest 'task_scheduler_direct_powershell_hidden'
+    Register-AndStartPhase2Task 'task_scheduler_direct_powershell_hidden'
+    $second = Wait-ForRunnerStart $RunnerStatus $BootstrapStatus $SchedulerStartupTimeoutSeconds
+    $attempts.Add([ordered]@{
+      mode = 'task_scheduler_direct_powershell_hidden'
+      started = [bool]$second.started
+      checked_at = (Get-Date).ToString('o')
+      bootstrap = $second.bootstrap
+      runner = $second.health
+    }) | Out-Null
+    $effectiveMode = 'task_scheduler_direct_powershell_hidden'
+
+    if (-not $second.started) {
+      Remove-ScheduledTaskRobust $ScheduledTaskName
+      Remove-Item -Force -LiteralPath $RunnerStatus,$BootstrapStatus -ErrorAction SilentlyContinue
+      Set-ManifestLauncherMode $Manifest 'hidden_direct_emergency_fallback'
+      $fallbackProcess = Start-HiddenPowerShellProcess $Bootstrap
+      $third = Wait-ForRunnerStart $RunnerStatus $BootstrapStatus ([Math]::Max(20, [int]($SchedulerStartupTimeoutSeconds / 2)))
+      $attempts.Add([ordered]@{
+        mode = 'hidden_direct_emergency_fallback'
+        started = [bool]$third.started
+        process_id = $fallbackProcess.Id
+        checked_at = (Get-Date).ToString('o')
+        bootstrap = $third.bootstrap
+        runner = $third.health
+      }) | Out-Null
+      $effectiveMode = 'hidden_direct_emergency_fallback'
+      if (-not $third.started) {
+        try { Stop-Process -Id $fallbackProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
+        $diagnostic = [ordered]@{
+          status = 'all_launch_methods_failed'
+          task_name = $ScheduledTaskName
+          run_dir = $RunDir
+          attempts = $attempts
+          created_at = (Get-Date).ToString('o')
+        }
+        Write-JsonAtomic $SchedulerDiagnostic $diagnostic
+        Remove-Item -Force -LiteralPath $Manifest,$Bootstrap -ErrorAction SilentlyContinue
+        throw "V6.2 三种隐藏启动方式均未进入 runner。诊断文件：$SchedulerDiagnostic"
+      }
+    }
+  }
+
+  $diagnostic = [ordered]@{
+    status = 'runner_started'
+    task_name = $ScheduledTaskName
+    run_dir = $RunDir
+    effective_launch_mode = $effectiveMode
+    attempts = $attempts
+    created_at = (Get-Date).ToString('o')
+  }
+  Write-JsonAtomic $SchedulerDiagnostic $diagnostic
 
   $status = [ordered]@{
     task = $Task
-    launch_mode = "windows_task_scheduler"
-    scheduled_task_name = $ScheduledTaskName
+    launch_mode = if ($effectiveMode -eq 'hidden_direct_emergency_fallback') { 'hidden_direct_emergency_fallback' } else { 'windows_task_scheduler' }
+    effective_launcher = $effectiveMode
+    scheduled_task_name = if ($effectiveMode -eq 'hidden_direct_emergency_fallback') { $null } else { $ScheduledTaskName }
     scheduled_task_self_delete = $true
-    scheduled_task_resume_trigger = "AtLogOn"
+    scheduled_task_resume_trigger = if ($effectiveMode -eq 'hidden_direct_emergency_fallback') { $null } else { 'AtLogOn' }
+    powershell_window_visible = $false
+    startup_verified = $true
     started_at = (Get-Date).ToString("o")
     run_dir = $RunDir
     manifest = $Manifest
+    bootstrap = $Bootstrap
+    bootstrap_status = $BootstrapStatus
+    launcher_trace = $LauncherTrace
+    scheduler_diagnostic = $SchedulerDiagnostic
     stdout_log = $StdoutLog
     stderr_log = $StderrLog
     cdp = $Cdp
@@ -163,13 +468,21 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     runtime_power_guard_status = (Join-Path $RunDir "runtime_power_guard_status.json")
     auto_resume_phase2 = [bool](-not $FreshStart)
     fresh_start = [bool]$FreshStart
-    shutdown_after_complete = [bool]$ShutdownAfterComplete
+    shutdown_mode = $ResolvedShutdownMode
+    shutdown_policy_file = $ShutdownPolicyFile
+    shutdown_instruction = $ShutdownInstruction
+    shutdown_after_complete = [bool]$EffectiveShutdownAfterComplete
+    shutdown_before = $ShutdownBefore
     shutdown_delay_seconds = $ShutdownDelaySeconds
     shutdown_validation = "final_xlsx + summary + collision + audit + debug_rows + finalized checkpoint + finalized progress + completion token"
-    note = "第二轮已交给 Windows 任务计划程序；系统重启后在用户登录时自动续跑。任务正常结束后会自删除。"
+    note = if ($effectiveMode -eq 'hidden_direct_emergency_fallback') {
+      '任务计划程序两种启动链均未通过健康检查，已自动删除失败任务并使用无窗口直接进程继续；本次不会积累计划任务，但系统重启后需再次手动启动。'
+    } else {
+      '任务计划程序启动已通过 runner PID 健康检查；无空白 PowerShell 窗口。系统重启后登录自动续跑，正常结束后任务和 bootstrap 自动删除。'
+    }
   }
-  $status | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $StatusFile -Encoding UTF8
-  $status | ConvertTo-Json -Depth 7
+  Write-JsonAtomic $StatusFile $status
+  $status | ConvertTo-Json -Depth 10
   exit 0
 }
 $ts2 = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -262,12 +575,10 @@ if ($Task -eq "login") {
     $cmd.Add('--fresh-start') | Out-Null
     Add-QuotedArg $cmd "true"
   }
-  if ($ShutdownAfterComplete) {
-    $cmd.Add('--shutdown-after-complete') | Out-Null
-    Add-QuotedArg $cmd "true"
-    $cmd.Add('--shutdown-delay-seconds') | Out-Null
-    Add-QuotedArg $cmd ([string]$ShutdownDelaySeconds)
-  }
+  $cmd.Add('--shutdown-policy-file') | Out-Null
+  Add-QuotedArg $cmd $ShutdownPolicyFile
+  $cmd.Add('--shutdown-wait-pid') | Out-Null
+  $cmd.Add('$PID') | Out-Null
   if (-not [string]::IsNullOrWhiteSpace($Config)) {
     $cmd.Add('--config') | Out-Null
     Add-QuotedArg $cmd $Config
@@ -287,10 +598,14 @@ if ($Task -eq "login") {
   Add-QuotedArg $cmd $RunDir
   $cmd.Add('-Cdp') | Out-Null
   Add-QuotedArg $cmd $Cdp
-  if ($ShutdownAfterComplete) {
+  if ($EffectiveShutdownAfterComplete) {
     $cmd.Add('-ShutdownAfterComplete') | Out-Null
     $cmd.Add('-ShutdownDelaySeconds') | Out-Null
     Add-QuotedArg $cmd ([string]$ShutdownDelaySeconds)
+    if ($ResolvedShutdownMode -eq 'before_deadline') {
+      $cmd.Add('-ShutdownBefore') | Out-Null
+      Add-QuotedArg $cmd $ShutdownBefore
+    }
   }
   if (-not [string]::IsNullOrWhiteSpace($Config)) {
     $cmd.Add('-Config') | Out-Null
@@ -305,7 +620,10 @@ $lines.Add('"[background] finished_at=$($finishedAt.ToString("o")) exit_code=$ex
 $lines.Add('exit $exitCode') | Out-Null
 Set-Content -LiteralPath $Wrapper -Value ($lines -join [Environment]::NewLine) -Encoding UTF8
 
-$process = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $Wrapper) -RedirectStandardOutput $StdoutLog -RedirectStandardError $StderrLog -PassThru -WindowStyle Hidden
+$process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
+  "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+  "-WindowStyle", "Hidden", "-File", $Wrapper
+) -RedirectStandardOutput $StdoutLog -RedirectStandardError $StderrLog -PassThru -WindowStyle Hidden
 
 $status = [ordered]@{
   task = $Task
@@ -323,11 +641,17 @@ $status = [ordered]@{
   completion_file = (Join-Path $RunDir "codex_task_complete.json")
   auto_resume_phase2 = [bool](-not $FreshStart)
   fresh_start = [bool]$FreshStart
-  shutdown_after_complete = [bool]$ShutdownAfterComplete
+  shutdown_mode = $ResolvedShutdownMode
+  shutdown_policy_file = $ShutdownPolicyFile
+  shutdown_instruction = $ShutdownInstruction
+  shutdown_after_complete = [bool]$EffectiveShutdownAfterComplete
+  shutdown_before = $ShutdownBefore
   shutdown_delay_seconds = $ShutdownDelaySeconds
-  shutdown_force_apps = [bool]$ShutdownAfterComplete
+  shutdown_force_apps = [bool]$EffectiveShutdownAfterComplete
   shutdown_watcher_file = (Join-Path $RunDir "conditional_shutdown_watcher_status.json")
-  note = "后台任务已启动；当前 PowerShell/Codex 命令会立即结束，聊天输入框可继续输入。"
+  powershell_window_visible = $false
+  launch_mode = "hidden_start_process"
+  note = "后台任务已使用隐藏窗口参数启动；当前 PowerShell/Codex 命令会立即结束。"
 }
 $status | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $StatusFile -Encoding UTF8
 $status | ConvertTo-Json -Depth 5

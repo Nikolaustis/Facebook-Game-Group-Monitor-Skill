@@ -1,0 +1,14 @@
+{
+  "policy_kind": "facebook_group_monitor_shutdown_policy",
+  "policy_version": 1,
+  "mode": "none",
+  "enabled": false,
+  "deadline": "",
+  "delay_seconds": 60,
+  "force_apps": false,
+  "default_when_unspecified": "none",
+  "source": "codex_natural_language_prompt",
+  "user_instruction": "",
+  "resolved_at": "",
+  "note": "Generated automatically from the current Codex prompt. Do not edit manually."
+}

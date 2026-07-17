@@ -1,4 +1,48 @@
-# V6.0.0 补丁说明：任务计划程序、逐候选完整断点与严格关机门槛
+﻿# V6.2.2
+
+- 默认完成后不关机；不再依赖 task_config 中固定日期或历史关机字段。
+- 新增 `-ShutdownMode none|after_complete|before_deadline`、`-ShutdownDeadline` 和 `-ShutdownInstruction`。
+- Codex 根据用户在文本框中的自然语言动态生成本次运行 `shutdown_policy.json`；用户无需手工编辑文件。
+- 任务计划程序、隐藏 direct fallback、系统重启续跑和最终关机 watcher 统一读取该运行专属策略。
+- `before_deadline` 强制要求带时区的绝对时间；示例日期不可复用。
+- 保留 `-ShutdownAfterComplete`、`-ShutdownBefore` 兼容入口，但新任务优先使用关机模式。
+- 计划任务及关机兜底任务执行后仍自动删除。
+- 关机 watcher 等待 PowerShell runner（而非仅等待 Node）退出，并在关机前再次清理主计划任务。
+- 一次性关机兜底任务改为“先自删任务定义，再执行 shutdown.exe”，避免立即关机后遗留任务。
+- 运行中重新提交关机意图时，phase2 在最终完成阶段重新读取 `shutdown_policy.json`；无效策略按不关机处理。
+
+# V6.2.1
+
+- 修复完成前截止时间关机：新增 `-ShutdownBefore` / `shutdown_before`，不再要求 Codex临时生成独立 Node watcher。
+- 强制关机改为隐藏 PowerShell watcher 调用 `System32\shutdown.exe`，提供直接调用、`Start-Process` 与自删除一次性计划任务三级兜底。
+- 修复 Node `spawnSync shutdown.exe EPERM` 导致完成后未关机的问题。
+- 群名中明确的泰语、越南语、印尼语等证据优先于少量讨论帖采样，避免泰语群被判 English、`Việt Nam` 群被判 Arabic。
+- GeoNames 对 timeout、网络错误、解析错误、HTTP 408/425/429/5xx 默认重试 2 次并记录 `external_geocoder_retries`。
+- 所有临时关机计划任务执行后自动删除。
+
+# V6.2.0 补丁说明：修复 WScript 空转与任务计划程序启动误判
+
+## 问题
+
+V6.1.0 在实机上出现 `wscript.exe` 驻留，但没有启动 `scheduled_phase2_runner.ps1`，也没有 runner 状态、power guard 或 stdout/stderr。旧启动器同时转发脚本、Manifest 和 TaskName，多层 Windows 参数解析缺少启动后健康检查；任务显示 Running 时还会被误判为有效实例。
+
+## 修改
+
+- 每次启动生成一个无参数 bootstrap 脚本，WScript 只传递该脚本路径。
+- WScript 通过 WMI 隐藏创建 PowerShell，失败时再使用 `WScript.Shell.Run`，并写入 launcher trace。
+- `phase2:bg` 等待 runner 状态和存活 PID，默认最长 45 秒。
+- 发现“任务 Running、runner 不存在”时自动停止并删除旧任务，不再返回 `already_running`。
+- WScript 链失败后自动切换到任务计划程序直接隐藏 PowerShell；再次失败则删除任务并使用无窗口直接进程兜底。
+- 新增 bootstrap、launcher 与启动尝试诊断文件。
+- 任务正常结束后同步删除临时 bootstrap；任务与 manifest 的自删除逻辑保留。
+
+## 兼容性
+
+- 基于 V6.1.0 累计升级，不改变已有完整 checkpoint、GeoNames、兄弟游戏、预筛和 XLSX 规则。
+- 不新增 npm 依赖。
+- 可直接使用原 RunDir 从完整 checkpoint 续跑。
+
+# V6.1.0 补丁说明：任务计划程序、逐候选完整断点与严格关机门槛
 
 ## 修复的问题
 
@@ -78,3 +122,15 @@
 - 基于 V5.6.0 累计升级。
 - 默认保留人工复核型弱命中，不降低现有召回。
 - 不新增 npm 依赖。
+
+
+## V6.1.0：任务计划程序全链路无窗口启动
+
+- 任务计划程序不再直接执行 `powershell.exe`，改由 Windows GUI 子系统的 `wscript.exe` 调用 `scripts/hidden_powershell_launcher.vbs`。
+- WScript 以窗口样式 `0` 启动并等待 scheduled runner，因此任务状态仍会保持为“正在运行”，但不会生成可见的空白 PowerShell 控制台。
+- `runtime_power_guard.ps1` 与延迟任务清理进程使用 `ProcessStartInfo.CreateNoWindow=true` 启动，避免子 PowerShell 短暂闪窗。
+- Chrome 启动脚本在已隐藏的 scheduled runner 内直接执行，不再额外创建 `powershell.exe` 子控制台。
+- `phase2:direct-bg` 保持原有隐藏 `Start-Process` 路径；本次故障对应的任务计划程序路径已改为 WScript 全无窗口启动。
+- 正常结束后的计划任务自删除、重启后登录续跑、完整 checkpoint 和严格关机门槛保持不变。
+
+旧 V6.0.0 任务若已经在运行，覆盖文件不会改变该任务已注册的 Action。应先让旧任务结束，或停止并删除旧任务，再使用 V6.1.0 重新启动第二轮。新注册任务的 Action 应显示为 `wscript.exe`，而不是 `powershell.exe`。

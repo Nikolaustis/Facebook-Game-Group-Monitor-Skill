@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)][string]$Manifest,
   [Parameter(Mandatory = $true)][string]$TaskName
 )
@@ -23,7 +23,58 @@ function Test-Cdp([string]$Cdp) {
   }
 }
 
-function Remove-OwnScheduledTaskNow([string]$Name, [string]$ManifestPath, [string]$StatusPath) {
+
+function ConvertTo-NativeQuotedArgument([string]$Value) {
+  if ($null -eq $Value) { return '""' }
+  # Windows command-line quoting compatible with CommandLineToArgvW rules.
+  $text = [string]$Value
+  if ($text -notmatch '[\s"]') { return $text }
+  $builder = New-Object System.Text.StringBuilder
+  [void]$builder.Append('"')
+  $backslashes = 0
+  foreach ($ch in $text.ToCharArray()) {
+    if ($ch -eq '\') {
+      $backslashes++
+      continue
+    }
+    if ($ch -eq '"') {
+      [void]$builder.Append(('\' * (($backslashes * 2) + 1)))
+      [void]$builder.Append('"')
+      $backslashes = 0
+      continue
+    }
+    if ($backslashes -gt 0) {
+      [void]$builder.Append(('\' * $backslashes))
+      $backslashes = 0
+    }
+    [void]$builder.Append($ch)
+  }
+  if ($backslashes -gt 0) { [void]$builder.Append(('\' * ($backslashes * 2))) }
+  [void]$builder.Append('"')
+  return $builder.ToString()
+}
+
+function Start-HiddenPowerShellProcess([string]$ScriptPath, [string[]]$ScriptArguments = @()) {
+  $parts = New-Object System.Collections.Generic.List[string]
+  foreach ($fixed in @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',$ScriptPath)) {
+    $parts.Add((ConvertTo-NativeQuotedArgument ([string]$fixed))) | Out-Null
+  }
+  foreach ($item in $ScriptArguments) {
+    $parts.Add((ConvertTo-NativeQuotedArgument ([string]$item))) | Out-Null
+  }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = 'powershell.exe'
+  $psi.Arguments = ($parts -join ' ')
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $psi
+  if (-not $process.Start()) { throw "Failed to start hidden PowerShell process: $ScriptPath" }
+  return $process
+}
+
+function Remove-OwnScheduledTaskNow([string]$Name, [string]$ManifestPath, [string]$StatusPath, [string]$BootstrapPath = '') {
   $deleted = $false
   try {
     Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction Stop
@@ -38,14 +89,18 @@ function Remove-OwnScheduledTaskNow([string]$Name, [string]$ManifestPath, [strin
     $status | Add-Member -NotePropertyName scheduled_task_deleted_at -NotePropertyValue (Get-Date).ToString('o') -Force
     $status | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $StatusPath -Encoding UTF8
   } catch {}
-  if ($deleted) { Remove-Item -Force -LiteralPath $ManifestPath -ErrorAction SilentlyContinue }
+  if ($deleted) {
+    Remove-Item -Force -LiteralPath $ManifestPath -ErrorAction SilentlyContinue
+    if (-not [string]::IsNullOrWhiteSpace($BootstrapPath)) { Remove-Item -Force -LiteralPath $BootstrapPath -ErrorAction SilentlyContinue }
+  }
   return $deleted
 }
 
-function Start-DeferredTaskCleanup([string]$Name, [string]$ManifestPath, [string]$StatusPath) {
+function Start-DeferredTaskCleanup([string]$Name, [string]$ManifestPath, [string]$StatusPath, [string]$BootstrapPath = '') {
   $escapedName = $Name.Replace("'", "''")
   $escapedManifest = $ManifestPath.Replace("'", "''")
   $escapedStatus = $StatusPath.Replace("'", "''")
+  $escapedBootstrap = $BootstrapPath.Replace("'", "''")
   $parent = $PID
   $command = @"
 `$ErrorActionPreference='SilentlyContinue'
@@ -59,9 +114,14 @@ try {
   `$status | Add-Member -NotePropertyName scheduled_task_deleted_at -NotePropertyValue (Get-Date).ToString('o') -Force
   `$status | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath '$escapedStatus' -Encoding UTF8
 } catch {}
-if (`$deleted) { Remove-Item -Force -LiteralPath '$escapedManifest' -ErrorAction SilentlyContinue }
+if (`$deleted) {
+  Remove-Item -Force -LiteralPath '$escapedManifest' -ErrorAction SilentlyContinue
+  if (-not [string]::IsNullOrWhiteSpace('$escapedBootstrap')) { Remove-Item -Force -LiteralPath '$escapedBootstrap' -ErrorAction SilentlyContinue }
+}
 "@
-  Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-Command',$command) -WindowStyle Hidden | Out-Null
+  $cleanupScript = Join-Path (Split-Path -Parent $StatusPath) ("scheduled_task_cleanup_{0}.ps1" -f ([Guid]::NewGuid().ToString('N')))
+  Set-Content -LiteralPath $cleanupScript -Value ($command + "`nRemove-Item -Force -LiteralPath '" + $cleanupScript.Replace("'", "''") + "' -ErrorAction SilentlyContinue") -Encoding UTF8
+  [void](Start-HiddenPowerShellProcess -ScriptPath $cleanupScript)
 }
 
 $Manifest = [System.IO.Path]::GetFullPath($Manifest)
@@ -74,6 +134,8 @@ $StatusFile = Join-Path $RunDir 'background_task.json'
 $RunnerStatus = Join-Path $RunDir 'scheduled_phase2_runner_status.json'
 $StdoutLog = [string]$m.stdout_log
 $StderrLog = [string]$m.stderr_log
+$BootstrapPath = [string]$m.bootstrap_script
+$LauncherMode = if ([string]::IsNullOrWhiteSpace([string]$m.launcher_mode)) { 'legacy_task_scheduler' } else { [string]$m.launcher_mode }
 $lockName = 'Local\FBGroupMonitor_' + (($TaskName -replace '[^A-Za-z0-9_]', '_'))
 $mutex = New-Object System.Threading.Mutex($false, $lockName)
 $lockAcquired = $false
@@ -131,8 +193,12 @@ try {
     runner_pid = $PID
     manifest = $Manifest
     run_dir = $RunDir
+    shutdown_mode = [string]$m.shutdown_mode
+    shutdown_policy_file = [string]$m.shutdown_policy_file
     started_at = (Get-Date).ToString('o')
     scheduled_task_deleted = $false
+    launcher = $LauncherMode
+    powershell_window_visible = $false
   })
 
   # Start the power guard before opening Chrome or waiting for CDP. The whole scheduled
@@ -140,17 +206,18 @@ try {
   if ([bool]$m.enable_power_guard) {
     $guardScript = Join-Path $RootDir 'scripts\runtime_power_guard.ps1'
     if (Test-Path -LiteralPath $guardScript) {
-      $guardProcess = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-        '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',$guardScript,
+      $guardProcess = Start-HiddenPowerShellProcess -ScriptPath $guardScript -ScriptArguments @(
         '-RunDir',$RunDir,'-ParentPid',[string]$PID,'-PollSeconds',[string]$m.power_guard_poll_seconds
-      ) -PassThru -WindowStyle Hidden
+      )
     }
   }
 
   if (-not (Test-Cdp ([string]$m.cdp))) {
     $openChrome = Join-Path $RootDir 'scripts\open_chrome_9222.ps1'
     if (Test-Path -LiteralPath $openChrome) {
-      & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $openChrome -Cdp ([string]$m.cdp) 1>> $StdoutLog 2>> $StderrLog
+      # Invoke the launcher script inside this already-hidden runner. Spawning a new
+      # powershell.exe here could briefly create an interactive console on some systems.
+      & $openChrome -Cdp ([string]$m.cdp) 1>> $StdoutLog 2>> $StderrLog
     }
     $deadline = (Get-Date).AddSeconds([Math]::Max(30, [int]$m.chrome_start_timeout_seconds))
     while ((Get-Date) -lt $deadline -and -not (Test-Cdp ([string]$m.cdp))) { Start-Sleep -Seconds 2 }
@@ -177,9 +244,17 @@ try {
   }
   if ([bool]$m.no_close_chrome) { $nodeArgs.Add('--no-close-chrome') | Out-Null; $nodeArgs.Add('true') | Out-Null }
   if ($runFreshStart) { $nodeArgs.Add('--fresh-start') | Out-Null; $nodeArgs.Add('true') | Out-Null }
-  if ([bool]$m.shutdown_after_complete) {
+  $nodeArgs.Add('--shutdown-wait-pid') | Out-Null; $nodeArgs.Add([string]$PID) | Out-Null
+  $nodeArgs.Add('--scheduled-task-name') | Out-Null; $nodeArgs.Add([string]$TaskName) | Out-Null
+  if (-not [string]::IsNullOrWhiteSpace([string]$m.shutdown_policy_file)) {
+    $nodeArgs.Add('--shutdown-policy-file') | Out-Null; $nodeArgs.Add([string]$m.shutdown_policy_file) | Out-Null
+  } elseif ([bool]$m.shutdown_after_complete -or -not [string]::IsNullOrWhiteSpace([string]$m.shutdown_before)) {
+    # Backward compatibility for manifests created before V6.2.2.
     $nodeArgs.Add('--shutdown-after-complete') | Out-Null; $nodeArgs.Add('true') | Out-Null
     $nodeArgs.Add('--shutdown-delay-seconds') | Out-Null; $nodeArgs.Add([string]$m.shutdown_delay_seconds) | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace([string]$m.shutdown_before)) {
+      $nodeArgs.Add('--shutdown-before') | Out-Null; $nodeArgs.Add([string]$m.shutdown_before) | Out-Null
+    }
   }
   if (-not [string]::IsNullOrWhiteSpace([string]$m.config)) {
     $nodeArgs.Add('--config') | Out-Null; $nodeArgs.Add([string]$m.config) | Out-Null
@@ -193,6 +268,8 @@ try {
     run_dir = $RunDir
     started_at = (Get-Date).ToString('o')
     scheduled_task_deleted = $false
+    launcher = $LauncherMode
+    powershell_window_visible = $false
   })
 
   & node @nodeArgs 1>> $StdoutLog 2>> $StderrLog
@@ -206,6 +283,8 @@ try {
     runner_pid = $PID
     exit_code = $exitCode
     run_dir = $RunDir
+    shutdown_mode = [string]$m.shutdown_mode
+    shutdown_policy_file = [string]$m.shutdown_policy_file
     finished_at = (Get-Date).ToString('o')
     scheduled_task_deleted = $false
   })
@@ -222,6 +301,8 @@ catch {
     exit_code = 1
     error = $message
     run_dir = $RunDir
+    shutdown_mode = [string]$m.shutdown_mode
+    shutdown_policy_file = [string]$m.shutdown_policy_file
     finished_at = (Get-Date).ToString('o')
     scheduled_task_deleted = $false
   })
@@ -243,9 +324,9 @@ finally {
   # A reboot kills this process before finally executes, so the task remains and its AtLogOn trigger resumes it.
   # Every normal execution end, success or error, schedules immediate self-deletion to avoid stale tasks.
   if ($normalRunnerExit -and $lockAcquired) {
-    $deletedNow = Remove-OwnScheduledTaskNow -Name $TaskName -ManifestPath $Manifest -StatusPath $RunnerStatus
+    $deletedNow = Remove-OwnScheduledTaskNow -Name $TaskName -ManifestPath $Manifest -StatusPath $RunnerStatus -BootstrapPath $BootstrapPath
     if (-not $deletedNow) {
-      Start-DeferredTaskCleanup -Name $TaskName -ManifestPath $Manifest -StatusPath $RunnerStatus
+      Start-DeferredTaskCleanup -Name $TaskName -ManifestPath $Manifest -StatusPath $RunnerStatus -BootstrapPath $BootstrapPath
     }
   }
 }

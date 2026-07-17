@@ -1,6 +1,44 @@
-# V6.0.0 任务计划程序、逐候选完整断点与运行期电源保护
+﻿# FB Game Group Monitor Skill V6.2.2
 
-V6.0.0 将第二轮后台执行默认切换为 Windows【任务计划程序】。任务以同一 `RunDir` 的确定性名称创建，立即启动，并附加 `AtLogOn` 触发器：Windows 更新或系统重启中断任务后，用户重新登录 Windows 时会自动打开持久化 Chrome 并从完整 checkpoint 续跑。
+## V6.2.2：在 Codex 文本框中指定是否关机
+
+默认完成后**不关机**。用户只需在对 Codex 的任务描述中写明：
+
+- “完成后不关机”或不提关机；
+- “完成后立即关机”；
+- “如果北京时间某日某时前完成，就立即关机”。
+
+Codex 会自动把该文本解析成运行参数，并在本次 `RunDir` 生成 `shutdown_policy.json`。用户不需要打开或修改任何 JSON、PowerShell 或日期配置。该运行文件会被任务计划程序、系统重启续跑和最终关机 watcher 共同读取。
+
+| 用户意图 | policy mode | 行为 |
+|---|---|---|
+| 未提关机／明确不关机 | `none` | 生成报表、关闭 Chrome、保持开机 |
+| 完成后关机 | `after_complete` | 严格终稿校验通过后关机 |
+| 截止时间前完成才关机 | `before_deadline` | 校验通过且完成时间早于截止时间才关机 |
+
+`shutdown_policy.json` 由 Codex/启动脚本自动生成，不应由用户手动编辑。截止时间必须根据本次提示词动态解析，文档示例日期不得复用。
+
+# V6.2.1.0 任务计划程序启动链修复
+
+V6.1.0 在部分 Windows 环境中会出现 `wscript.exe` 长驻，但 scheduled runner、power guard 和日志均未建立。V6.2.0 不再把“任务状态为 Running”视为启动成功，而是必须验证 `scheduled_phase2_runner_status.json` 中的 runner PID 确实存活。
+
+启动链依次为：
+
+1. WScript + WMI 隐藏进程，只传递一个自动生成的 bootstrap 脚本路径，避免多层参数转义；
+2. 若在默认 45 秒内未进入 runner，自动停止并删除卡住任务，改用任务计划程序直接隐藏 PowerShell；
+3. 若第二种方式仍失败，删除失败任务并使用 `CreateNoWindow=true` 的直接隐藏进程继续采集，保证不会静默空转。
+
+新增诊断文件：
+
+- `scheduled_phase2_launcher_trace.log`
+- `scheduled_phase2_bootstrap_status.json`
+- `scheduled_phase2_startup_diagnostic.json`
+
+任务正常结束后仍会删除任务定义、manifest 与临时 bootstrap，不在【任务计划程序】中遗留冗余条目。系统重启中断时，仅保留真正用于登录后续跑的任务。
+
+# V6.2.0 任务计划程序启动链修复、逐候选完整断点与运行期电源保护
+
+V6.1.0 将第二轮后台执行默认切换为 Windows【任务计划程序】。任务以同一 `RunDir` 的确定性名称创建，立即启动，并附加 `AtLogOn` 触发器：Windows 更新或系统重启中断任务后，用户重新登录 Windows 时会自动打开持久化 Chrome 并从完整 checkpoint 续跑。
 
 核心规则：
 
@@ -49,11 +87,6 @@ npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo
 ```
 
 配置项 `phase2_auto_resume` 默认是 `true`。显式 `--fresh-start true` 或 PowerShell 的 `-FreshStart` 优先。
-
-# FB Game Group Monitor Skill V6.0.0
-
-
-
 
 ## V5.7.0 第二轮候选群名预筛
 
@@ -183,7 +216,7 @@ Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Forc
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V6.0.0 支持任务计划程序后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回任务计划程序名称与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭，只有用户明确要求“完成后关机”时才通过显式参数触发，并由独立 Node 监控器在锁屏状态下执行强制关机。V5.8.0 同时保留此前对蒙古语误判为俄语的修复。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V6.2.0 支持带 runner 健康检查和自动兜底的任务计划程序后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回任务计划程序名称与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭；Codex 根据当前文本生成运行专属 `shutdown_policy.json`，启用时由隐藏 PowerShell watcher 在锁屏状态下执行严格校验后的强制关机。V5.8.0 同时保留此前对蒙古语误判为俄语的修复。
 
 
 ## GeoNames 外部地理解析兜底
@@ -211,7 +244,7 @@ GeoNames 用户名放在 `config/local/geonames.local.json`，根目录 `.gitign
 - About 仍无结果时，使用泰语、印尼语等高确定性语言映射；只有语言也无法判定时，才调用群名 GeoNames。
 - Excel 输出固定列顺序，`snapshot_date` 和 `group_id` 强制文本格式，活跃指数/规模增速为百分比公式。
 - 第二轮后台启动后会立即返回任务计划程序名称、日志路径和运行目录；默认每 30 分钟输出一次 `codex_progress_report`，并刷新 `codex_progress_report.json`。
-- 可选“完成后关机”：默认不启用。启用后会在最终报表生成并确认 Chrome 已关闭后，启动独立 Node 监控器；该监控器等待第二轮进程退出、核验结果文件，再执行 `shutdown.exe /s /f /t <秒数>`。
+- 可选“完成后关机”：默认不启用。启用后会在最终报表生成并确认 Chrome 已关闭后，启动隐藏 PowerShell 关机 watcher；该监控器等待第二轮进程退出、核验结果文件，再执行 `shutdown.exe /s /f /t <秒数>`。
 
 ## 变体规则
 
@@ -268,8 +301,8 @@ npm run phase1:bg -- -Games "All Star Tower Defense" -RunDir ".\runs\demo" -Conf
 # 后台第二轮；默认 30 分钟刷新/输出一次 codex_progress_report，完成后自动关闭 Chrome
 npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json"
 
-# 只有用户明确要求“完成后关机”时，才加入这个开关；默认不要加
-npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -ShutdownAfterComplete -ShutdownDelaySeconds 60
+# Codex 根据当前用户文本显式传入模式；默认 none
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -ShutdownMode none -ShutdownInstruction "用户未要求关机"
 ```
 
 后台启动脚本会立即返回：
@@ -279,7 +312,7 @@ npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo
 - `stdout_log` / `stderr_log`：后台日志。
 - `codex_progress_report.json`：Codex 进度快照。
 - `background_task.json`：本次后台任务元信息。
-- `codex_task_complete.json`：第二轮完成状态；若启用关机，会记录独立关机监控器信息。
+- `codex_task_complete.json`：第二轮完成状态；若启用关机，会记录隐藏 PowerShell 关机 watcher信息。
 - `conditional_shutdown_watcher_status.json`：关机监控器状态，包括最终 Excel 校验和强制关机命令是否已发出。
 
 查看状态：
@@ -300,14 +333,16 @@ node .\scripts\phase2_collect_details.js --index ".\runs\demo\phase1_index.json"
 {
   "progress_report_every_minutes": 30,
   "close_chrome_after_report": true,
+  "shutdown_mode": "none",
   "shutdown_after_complete": false,
+  "shutdown_before": "",
   "shutdown_delay_seconds": 60
 }
 ```
 
 设为 `0` 可关闭定时汇报。第二轮最终 Excel 报告生成后默认自动关闭 Chrome；如需保留浏览器，加 `--no-close-chrome true`，或在配置中设置 `"close_chrome_after_report": false`。
 
-自动关机默认关闭。只有当用户在提示词中明确要求“完成后关机 / 跑完关机”时，Codex 才能使用 `-ShutdownAfterComplete` 或 `--shutdown-after-complete true`。触发后，第二轮会先写入最终报表并确认 Chrome 已关闭，再启动独立 Node 关机监控器。监控器在第二轮 Node 进程退出后核验 Excel 与完成状态，随后执行：`shutdown.exe /s /f /t <秒数> /d p:0:0 /c "..."`。`/f` 会强制关闭阻塞应用，监控器在锁屏状态下仍会运行；默认延迟 60 秒，期间可用 `shutdown.exe /a` 取消。若监控器启动失败或任一严格校验不通过，第二轮不会发送关机命令，电脑保持开机。
+自动关机默认关闭。Codex 必须依据当前文本选择 `none / after_complete / before_deadline`，启动脚本自动生成本次运行的 `shutdown_policy.json`。用户无需修改配置文件。启用关机后，第二轮先写入最终报表并确认 Chrome 已关闭，再由隐藏 PowerShell watcher 核验 Excel、finalized checkpoint、completion token 和截止时间，随后执行 `shutdown.exe /s /f /t <秒数>`。若 watcher 启动失败或任一严格校验不通过，电脑保持开机。
 
 ## 输出文件
 
@@ -327,7 +362,7 @@ node .\scripts\phase2_collect_details.js --index ".\runs\demo\phase1_index.json"
 - `phase2_autosave_summary.json`: 当前局部摘要，保持兼容旧观察命令。
 - `partial_verified_rows.xlsx`: 已通过筛选行的可读暂存表；启动时先创建表头，每命中 1 条有效群组就立即保存。
 - `phase2_autosave_last_error.txt`: 仅当暂存 Excel 写入失败时出现；通常是文件被 Excel 打开占用。
-- `codex_task_complete.json`: 第二轮最终状态文件，记录完整报表是否生成、Chrome 是否关闭、是否请求关机及独立关机监控器信息。
+- `codex_task_complete.json`: 第二轮最终状态文件，记录完整报表是否生成、Chrome 是否关闭、是否请求关机及隐藏 PowerShell 关机 watcher信息。
 - `conditional_shutdown_watcher_status.json`: 仅启用完成后关机时生成；记录第二轮退出后的文件校验与强制关机结果。
 
 Excel 工作簿包含：
@@ -461,3 +496,35 @@ npm run monitor:bg -- -Games "Anime Guardians,Anime Last Stand,Anime Overload,An
 ## 隐私说明
 
 本项目不应包含 Facebook 账号、Cookie、token 或任何登录态文件。所有采集都应通过用户手动登录的浏览器会话执行。
+
+
+## V6.1.0：任务计划程序全链路无窗口启动
+
+- 任务计划程序不再直接执行 `powershell.exe`，改由 Windows GUI 子系统的 `wscript.exe` 调用 `scripts/hidden_powershell_launcher.vbs`。
+- WScript 以窗口样式 `0` 启动并等待 scheduled runner，因此任务状态仍会保持为“正在运行”，但不会生成可见的空白 PowerShell 控制台。
+- `runtime_power_guard.ps1` 与延迟任务清理进程使用 `ProcessStartInfo.CreateNoWindow=true` 启动，避免子 PowerShell 短暂闪窗。
+- Chrome 启动脚本在已隐藏的 scheduled runner 内直接执行，不再额外创建 `powershell.exe` 子控制台。
+- `phase2:direct-bg` 保持原有隐藏 `Start-Process` 路径；本次故障对应的任务计划程序路径已改为 WScript 全无窗口启动。
+- 正常结束后的计划任务自删除、重启后登录续跑、完整 checkpoint 和严格关机门槛保持不变。
+
+旧 V6.0.0 任务若已经在运行，覆盖文件不会改变该任务已注册的 Action。应先让旧任务结束，或停止并删除旧任务，再使用 V6.1.0 重新启动第二轮。新注册任务的 Action 应显示为 `wscript.exe`，而不是 `powershell.exe`。
+
+
+## V6.2.2 文本意图关机
+
+Codex 应根据当前用户文本调用：
+
+```powershell
+# 默认不关机
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -ShutdownMode none -ShutdownInstruction "用户未要求关机"
+
+# 完成后立即关机
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -ShutdownMode after_complete -ShutdownDelaySeconds 0 -ShutdownInstruction "完成后立即关机"
+
+# 指定截止时间前完成才关机
+npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo" -Config ".\runs\demo\task_config.json" -ShutdownMode before_deadline -ShutdownDeadline "<Codex 根据本次提示解析出的带时区绝对时间>" -ShutdownDelaySeconds 0 -ShutdownInstruction "<用户本次关机要求摘要>"
+```
+
+截止时间必须根据本次提示词动态解析，示例日期不得复用。`shutdown_policy.json` 会自动生成并贯穿任务计划程序、direct fallback 和重启续跑。旧 `-ShutdownBefore` 参数仅保留兼容性。
+
+V6.2.1 的群名强语言证据优先和 GeoNames 瞬时错误重试继续保留。

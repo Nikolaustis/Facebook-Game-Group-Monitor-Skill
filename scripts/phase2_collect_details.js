@@ -221,41 +221,43 @@ function verifyPhase2Finalization({
   };
 }
 
-function requestWindowsForcedShutdown({ delaySeconds, comment }) {
-  return new Promise((resolve) => {
-    if (process.platform !== 'win32') {
-      resolve({ ok: false, requested: false, reason: `unsupported_platform:${process.platform}` });
-      return;
-    }
+function normalizeShutdownDeadline(raw) {
+  const value = clean(raw);
+  if (!value) return '';
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) throw new Error(`Invalid shutdown deadline: ${value}. Use ISO 8601 with timezone, format: YYYY-MM-DDTHH:mm:ss+08:00.`);
+  return new Date(parsed).toISOString();
+}
 
-    const safeDelaySeconds = Math.max(0, Math.floor(Number(delaySeconds) || 0));
-    const safeComment = String(comment || 'FB group monitoring finished. System will shut down.').slice(0, 512);
-    const shutdownArgs = ['/s', '/f', '/t', String(safeDelaySeconds), '/d', 'p:0:0', '/c', safeComment];
-    execFile('shutdown.exe', shutdownArgs, (err, stdout, stderr) => {
-      if (err) {
-        resolve({
-          ok: false,
-          requested: true,
-          reason: err && err.message ? err.message : String(err),
-          command: `shutdown.exe ${shutdownArgs.join(' ')}`,
-          force_apps: true,
-          stdout: stdout || '',
-          stderr: stderr || '',
-        });
-        return;
-      }
-      resolve({
-        ok: true,
-        requested: true,
-        reason: 'forced_shutdown_command_sent',
-        command: `shutdown.exe ${shutdownArgs.join(' ')}`,
-        delay_seconds: safeDelaySeconds,
-        force_apps: true,
-        stdout: stdout || '',
-        stderr: stderr || '',
-      });
-    });
-  });
+function loadShutdownPolicy(policyFile) {
+  const resolvedFile = clean(policyFile) ? path.resolve(policyFile) : '';
+  if (!resolvedFile) return null;
+  if (!fs.existsSync(resolvedFile)) {
+    throw new Error(`Shutdown policy file does not exist: ${resolvedFile}`);
+  }
+  let payload;
+  try {
+    payload = JSON.parse(fs.readFileSync(resolvedFile, 'utf8').replace(/^\uFEFF/, ''));
+  } catch (err) {
+    throw new Error(`Invalid shutdown policy JSON: ${resolvedFile}: ${err && err.message ? err.message : String(err)}`);
+  }
+  const mode = clean(payload && payload.mode).toLowerCase() || 'none';
+  if (!['none', 'after_complete', 'before_deadline'].includes(mode)) {
+    throw new Error(`Unsupported shutdown policy mode: ${mode}`);
+  }
+  const deadline = mode === 'before_deadline' ? normalizeShutdownDeadline(payload.deadline) : '';
+  if (mode === 'before_deadline' && !deadline) {
+    throw new Error('shutdown_policy.json mode=before_deadline requires a timezone-aware deadline.');
+  }
+  return {
+    file: resolvedFile,
+    mode,
+    enabled: mode !== 'none',
+    deadline,
+    delaySeconds: parseNonNegativeInt(payload.delay_seconds, 60),
+    source: clean(payload.source || ''),
+    userInstruction: clean(payload.user_instruction || ''),
+  };
 }
 
 function startConditionalShutdownWatcher({
@@ -270,36 +272,45 @@ function startConditionalShutdownWatcher({
   outProgress,
   delaySeconds,
   comment,
+  shutdownBefore,
+  scheduledTaskName,
 }) {
   if (process.platform !== 'win32') {
     return { ok: false, requested: false, reason: `unsupported_platform:${process.platform}` };
   }
-  const watcherScript = path.join(__dirname, 'conditional_shutdown_watcher.js');
+  const watcherScript = path.join(__dirname, 'conditional_shutdown_watcher.ps1');
   if (!fs.existsSync(watcherScript)) {
     return { ok: false, requested: false, reason: 'conditional_shutdown_watcher_missing', watcher_script: watcherScript };
   }
 
+  const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+  const powershellExe = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const token = `fbm-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const watcherStatusFile = path.join(path.dirname(completionFile), 'conditional_shutdown_watcher_status.json');
   const safeDelaySeconds = Math.max(0, Math.floor(Number(delaySeconds) || 0));
   const safeComment = String(comment || 'FB group monitoring finished. System will shut down.').slice(0, 512);
+  const normalizedDeadline = shutdownBefore ? normalizeShutdownDeadline(shutdownBefore) : '';
   try {
-    const child = spawn(process.execPath, [
-      watcherScript,
-      '--watch-pid', String(watchPid),
-      '--completion', completionFile,
-      '--out-xlsx', outXlsx,
-      '--out-summary', outSummary,
-      '--out-collision', outCollision,
-      '--out-audit', outAudit,
-      '--out-debug-rows', outDebugRows,
-      '--out-checkpoint', outCheckpoint,
-      '--out-progress', outProgress,
-      '--status-file', watcherStatusFile,
-      '--delay-seconds', String(safeDelaySeconds),
-      '--comment', safeComment,
-      '--token', token,
-    ], {
+    const psArgs = [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+      '-File', watcherScript,
+      '-WatchPid', String(watchPid),
+      '-Completion', completionFile,
+      '-OutXlsx', outXlsx,
+      '-OutSummary', outSummary,
+      '-OutCollision', outCollision,
+      '-OutAudit', outAudit,
+      '-OutDebugRows', outDebugRows,
+      '-OutCheckpoint', outCheckpoint,
+      '-OutProgress', outProgress,
+      '-StatusFile', watcherStatusFile,
+      '-DelaySeconds', String(safeDelaySeconds),
+      '-Comment', safeComment,
+      '-Token', token,
+    ];
+    if (normalizedDeadline) psArgs.push('-ShutdownBefore', normalizedDeadline);
+    if (clean(scheduledTaskName)) psArgs.push('-ScheduledTaskName', clean(scheduledTaskName));
+    const child = spawn(powershellExe, psArgs, {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
@@ -308,14 +319,15 @@ function startConditionalShutdownWatcher({
     return {
       ok: true,
       requested: true,
-      reason: 'conditional_forced_shutdown_watcher_started',
+      reason: 'conditional_forced_shutdown_powershell_watcher_started',
       watcher_pid: child.pid,
       watcher_status_file: watcherStatusFile,
       watcher_script: watcherScript,
       watcher_token: token,
+      shutdown_before: normalizedDeadline,
       delay_seconds: safeDelaySeconds,
       force_apps: true,
-      shutdown_command_template: `shutdown.exe /s /f /t ${safeDelaySeconds} /d p:0:0 /c <comment>`,
+      shutdown_command_template: `${systemRoot}\\System32\\shutdown.exe /s /f /t ${safeDelaySeconds} /d p:0:0 /c <comment>`,
     };
   } catch (err) {
     return {
@@ -1016,6 +1028,13 @@ function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussi
   const languageDiscussionText = stripKnownGameTitlesFromText(discussionLanguageText, titlePhrases);
   const languageSnippet = stripKnownGameTitlesFromText(snippet, titlePhrases);
 
+  // V6.2.1: an explicit language/country signal remaining in the group name after
+  // game-title masking is stronger than a small discussion sample. This prevents an
+  // Arabic/English sample from overriding title evidence such as ไทย, ซื้อขาย or Việt Nam.
+  // Generic English words (Global, Community, Trade) do not produce a group-name signal.
+  const groupNameSignal = detectLanguageFromGroupName(languageGroupName);
+  if (groupNameSignal) return groupNameSignal;
+
   const discussionEvidence = languageEvidenceText('', '', languageDiscussionText, '');
   if (discussionEvidence) {
     const postLevelLanguage = detectDiscussionLanguageFromPosts(languageDiscussionText);
@@ -1025,11 +1044,6 @@ function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussi
     if (discussionDetected && discussionDetected !== 'Unknown' && discussionDetected !== 'Mixed') {
       return discussionDetected;
     }
-  }
-
-  const groupNameSignal = detectLanguageFromGroupName(languageGroupName);
-  if (groupNameSignal) {
-    if (!discussionEvidence || groupNameSignal !== 'Chinese') return groupNameSignal;
   }
 
   if (discussionEvidence) {
@@ -1398,6 +1412,8 @@ function mergeExternalGeocoderConfig(config, configFile, outDir) {
   merged.max_queries_per_group = Math.max(1, Math.min(8, Number(merged.max_queries_per_group || 4)));
   merged.max_rows = Math.max(1, Math.min(10, Number(merged.max_rows || 5)));
   merged.timeout_ms = Math.max(1000, Number(merged.timeout_ms || 8000));
+  merged.retry_count = Math.max(0, Math.min(4, Number(merged.retry_count ?? 2)));
+  merged.retry_backoff_ms = Math.max(250, Number(merged.retry_backoff_ms || 1500));
   merged.rate_limit_ms = Math.max(0, Number(merged.rate_limit_ms || 1200));
   merged.min_confidence = Math.max(0, Math.min(1, Number(merged.min_confidence || 0.75)));
   merged.ambiguity_margin = Math.max(0, Math.min(1, Number(merged.ambiguity_margin || 0.04)));
@@ -2019,6 +2035,28 @@ async function sleepMs(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isTransientGeoNamesFailure(response) {
+  if (!response || response.ok) return false;
+  if (['network_error', 'timeout', 'parse_error'].includes(response.status)) return true;
+  if (response.status === 'geonames_http_error') {
+    const code = Number(response.http_status || 0);
+    return code === 408 || code === 425 || code === 429 || code >= 500;
+  }
+  return false;
+}
+
+async function geonamesRequestWithRetry(query, username, externalGeocoder, stats) {
+  const maxAttempts = 1 + Math.max(0, Number(externalGeocoder.retry_count || 0));
+  let response = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    response = await geonamesRequest(query, username, externalGeocoder.max_rows, externalGeocoder.timeout_ms, externalGeocoder.endpoint);
+    if (response.ok || !isTransientGeoNamesFailure(response) || attempt >= maxAttempts) break;
+    if (stats) stats.external_geocoder_retries = (stats.external_geocoder_retries || 0) + 1;
+    await sleepMs(Math.max(250, Number(externalGeocoder.retry_backoff_ms || 1500)) * attempt);
+  }
+  return response;
+}
+
 async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
   if (!externalGeocoder || !externalGeocoder.enabled) return { status: 'disabled', source, query };
   if (clean(externalGeocoder.provider).toLowerCase() !== 'geonames') return { status: 'unsupported_provider', source, query };
@@ -2045,7 +2083,7 @@ async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
     return { ...cached, cached: true, source, query: normalizedQuery };
   }
   if (stats) stats.external_geocoder_requests = (stats.external_geocoder_requests || 0) + 1;
-  const response = await geonamesRequest(normalizedQuery, username, externalGeocoder.max_rows, externalGeocoder.timeout_ms, externalGeocoder.endpoint);
+  const response = await geonamesRequestWithRetry(normalizedQuery, username, externalGeocoder, stats);
   let evaluated = evaluateGeonamesResults(normalizedQuery, response, externalGeocoder.min_confidence, externalGeocoder.ambiguity_margin);
   // V5.5: a group-name query is fuzzy context, unlike an explicit About > Location value.
   // Accept it only when GeoNames confirms the queried phrase as an exact primary/alternate
@@ -3535,8 +3573,35 @@ function resolveCollisions(rows) {
   const closeChromeAfterReport = (args['no-close-chrome'] === 'true' || args['keep-chrome-open'] === 'true')
     ? false
     : boolFromFlag(args, config, 'close-chrome-after-report', 'close_chrome_after_report', true);
-  const shutdownAfterComplete = boolFromFlag(args, config, 'shutdown-after-complete', 'shutdown_after_complete', false);
-  const shutdownDelaySeconds = parseNonNegativeInt(args['shutdown-delay-seconds'] ?? config.shutdown_delay_seconds, 60);
+  const shutdownPolicyPath = clean(args['shutdown-policy-file']);
+  let shutdownPolicy = loadShutdownPolicy(shutdownPolicyPath);
+  let shutdownBefore = shutdownPolicy
+    ? shutdownPolicy.deadline
+    : clean(args['shutdown-before'] ?? config.shutdown_before ?? '');
+  let normalizedShutdownBefore = shutdownBefore ? normalizeShutdownDeadline(shutdownBefore) : '';
+  let shutdownAfterComplete = shutdownPolicy
+    ? shutdownPolicy.enabled
+    : (Boolean(normalizedShutdownBefore) || boolFromFlag(args, config, 'shutdown-after-complete', 'shutdown_after_complete', false));
+  let shutdownDelaySeconds = shutdownPolicy
+    ? shutdownPolicy.delaySeconds
+    : parseNonNegativeInt(args['shutdown-delay-seconds'] ?? config.shutdown_delay_seconds, 60);
+  let shutdownMode = shutdownPolicy
+    ? shutdownPolicy.mode
+    : (normalizedShutdownBefore ? 'before_deadline' : (shutdownAfterComplete ? 'after_complete' : 'none'));
+  let shutdownPolicyReloadError = '';
+  const refreshShutdownPolicy = () => {
+    if (!shutdownPolicyPath) return;
+    const reloaded = loadShutdownPolicy(shutdownPolicyPath);
+    shutdownPolicy = reloaded;
+    shutdownBefore = reloaded.deadline;
+    normalizedShutdownBefore = reloaded.deadline;
+    shutdownAfterComplete = reloaded.enabled;
+    shutdownDelaySeconds = reloaded.delaySeconds;
+    shutdownMode = reloaded.mode;
+    shutdownPolicyReloadError = '';
+  };
+  const shutdownWaitPid = Math.max(1, Math.floor(Number(args['shutdown-wait-pid'] || process.ppid || process.pid)));
+  const scheduledTaskName = clean(args['scheduled-task-name'] || '');
   const threshold = Number(args.threshold || config.threshold || 10);
   const candidateTimeoutMs = Math.max(1000, Number(args['candidate-timeout-ms'] || config.candidate_timeout_ms || 60000));
   const namePrefilterConfig = config.phase2_name_prefilter && typeof config.phase2_name_prefilter === 'object'
@@ -3616,6 +3681,7 @@ function resolveCollisions(rows) {
     out_summary: outSummary,
     close_chrome_after_report: closeChromeAfterReport,
     shutdown_after_complete: shutdownAfterComplete,
+    shutdown_before: normalizedShutdownBefore,
     shutdown_delay_seconds: shutdownDelaySeconds,
     shutdown_force_apps: true,
   };
@@ -3662,6 +3728,7 @@ function resolveCollisions(rows) {
       external_geocoder_enable_source: externalGeocoder.enable_source || '',
       external_geocoder_attempted: 0,
       external_geocoder_requests: 0,
+      external_geocoder_retries: 0,
       external_geocoder_cache_hits: 0,
       external_geocoder_accepted: 0,
       external_geocoder_ambiguous: 0,
@@ -4377,6 +4444,21 @@ function resolveCollisions(rows) {
     }
 
     if (finalReportGenerated) {
+      // Re-read the run-local policy at finalization. This lets Codex safely update the
+      // user's shutdown instruction while a long task is running; invalid updates fail closed.
+      if (shutdownPolicyPath) {
+        try {
+          refreshShutdownPolicy();
+        } catch (err) {
+          shutdownPolicyReloadError = err && err.message ? err.message : String(err);
+          shutdownPolicy = null;
+          shutdownBefore = '';
+          normalizedShutdownBefore = '';
+          shutdownAfterComplete = false;
+          shutdownDelaySeconds = 60;
+          shutdownMode = 'none';
+        }
+      }
       const chromeClosed = closeChromeAfterReport ? Boolean(chromeCloseResult && chromeCloseResult.ok) : false;
       writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
         status: 'completed',
@@ -4386,6 +4468,10 @@ function resolveCollisions(rows) {
         chrome_closed: chromeClosed,
         chrome_close_result: chromeCloseResult,
         shutdown_requested: false,
+        shutdown_mode: shutdownMode,
+        shutdown_policy_file: shutdownPolicy ? shutdownPolicy.file : shutdownPolicyPath,
+        shutdown_policy_source: shutdownPolicy ? shutdownPolicy.source : '',
+        shutdown_policy_reload_error: shutdownPolicyReloadError,
         shutdown_result: shutdownResult,
         completed_at: new Date().toISOString(),
       }));
@@ -4405,7 +4491,7 @@ function resolveCollisions(rows) {
           };
         } else {
           shutdownResult = startConditionalShutdownWatcher({
-            watchPid: process.pid,
+            watchPid: shutdownWaitPid,
             completionFile: outCompletion,
             outXlsx,
             outSummary,
@@ -4416,13 +4502,15 @@ function resolveCollisions(rows) {
             outProgress,
             delaySeconds: shutdownDelaySeconds,
             comment: 'FB group monitoring finished. System will shut down.',
+            shutdownBefore: normalizedShutdownBefore,
+            scheduledTaskName,
           });
           // V6.0 intentionally has no direct shutdown fallback. If the validated watcher
           // cannot start, the machine remains on rather than risking shutdown after a partial run.
         }
         writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
           status: shutdownResult.ok
-            ? (shutdownResult.reason === 'conditional_forced_shutdown_watcher_started'
+            ? (['conditional_forced_shutdown_watcher_started', 'conditional_forced_shutdown_powershell_watcher_started'].includes(shutdownResult.reason)
               ? 'completed_shutdown_watcher_started'
               : 'completed_forced_shutdown_scheduled')
             : 'completed_shutdown_not_scheduled',
@@ -4432,6 +4520,12 @@ function resolveCollisions(rows) {
           chrome_closed: chromeClosed,
           chrome_close_result: chromeCloseResult,
           shutdown_requested: Boolean(shutdownAfterComplete),
+          shutdown_mode: shutdownMode,
+          shutdown_policy_file: shutdownPolicy ? shutdownPolicy.file : shutdownPolicyPath,
+          shutdown_policy_source: shutdownPolicy ? shutdownPolicy.source : '',
+          shutdown_policy_reload_error: shutdownPolicyReloadError,
+          shutdown_wait_pid: shutdownWaitPid,
+          scheduled_task_name: scheduledTaskName,
           shutdown_result: shutdownResult,
           shutdown_watcher_pid: shutdownResult.watcher_pid || null,
           shutdown_watcher_status_file: shutdownResult.watcher_status_file || '',
@@ -4444,6 +4538,10 @@ function resolveCollisions(rows) {
           final_report_generated: true,
           close_chrome_after_report: closeChromeAfterReport,
           shutdown_after_complete: shutdownAfterComplete,
+          shutdown_mode: shutdownMode,
+          shutdown_policy_file: shutdownPolicy ? shutdownPolicy.file : shutdownPolicyPath,
+          shutdown_policy_reload_error: shutdownPolicyReloadError,
+          shutdown_before: normalizedShutdownBefore,
           shutdown_delay_seconds: shutdownDelaySeconds,
           ...shutdownResult,
           cancel_command: shutdownResult.requested ? 'shutdown.exe /a' : '',

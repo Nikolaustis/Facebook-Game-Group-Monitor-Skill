@@ -601,6 +601,10 @@
     "rate_limit_ms": 1200,
     "cache_file": "runs/geocode_cache.json",
     "endpoint": "http://api.geonames.org/searchJSON",
-    "group_name_single_token_min_population": 50000
-  }
+    "group_name_single_token_min_population": 50000,
+    "retry_count": 2,
+    "retry_backoff_ms": 1500
+  },
+  "shutdown_before": "",
+  "shutdown_mode": "none"
 }
