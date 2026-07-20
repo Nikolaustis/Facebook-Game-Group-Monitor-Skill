@@ -1,7 +1,7 @@
 {
-  "name": "fb-group-monitor-skill-v6-3-0",
-  "version": "6.3.0",
-  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with V6.3.0 in-runner verified shutdown coordination, prompt-driven run-local shutdown policies, strict finalization checks, reboot-safe checkpoints, and self-deleting scheduled tasks.",
+  "name": "fb-group-monitor-skill-v6-5-4",
+  "version": "6.5.4",
+  "description": "Two-stage Facebook game-group monitor with DeepSeek-compatible API-first semantic region adjudication, verified Codex CLI fallback, deterministic rules, GeoNames verification, durable checkpoints, scheduled recovery, and prompt-driven shutdown.",
   "private": true,
   "scripts": {
     "login": "powershell -ExecutionPolicy Bypass -File .\\scripts\\open_chrome_9222.ps1",
@@ -15,7 +15,13 @@
     "phase2:bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start_background_task.ps1 -Task phase2",
     "monitor:bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start_background_task.ps1 -Task monitor",
     "status:bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\show_background_task_status.ps1",
-    "phase2:direct-bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start_background_task.ps1 -Task phase2 -DirectBackground"
+    "phase2:direct-bg": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start_background_task.ps1 -Task phase2 -DirectBackground",
+    "semantic:diagnose": "node .\\scripts\\diagnose_codex_exec.js",
+    "semantic:verify-codex": "node .\\scripts\\diagnose_codex_exec.js --smoke-test",
+    "semantic:install-codex-cli": "powershell -ExecutionPolicy Bypass -File .\\scripts\\install_official_codex_cli.ps1 -Method OfficialInstaller",
+    "semantic:install-codex-cli:npm": "powershell -ExecutionPolicy Bypass -File .\\scripts\\install_official_codex_cli.ps1 -Method Npm",
+    "semantic:verify-api": "node .\\scripts\\diagnose_semantic_provider_chain.js --api-only",
+    "semantic:verify-chain": "node .\\scripts\\diagnose_semantic_provider_chain.js"
   },
   "dependencies": {
     "playwright": "^1.59.1",

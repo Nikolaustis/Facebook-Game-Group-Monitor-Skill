@@ -6,6 +6,12 @@ const { execFile, spawn } = require('child_process');
 const http = require('http');
 const https = require('https');
 const { createCodexProgressReporter, parseProgressReportEveryMinutes } = require('./progress_reporter');
+const {
+  SemanticRegionCache,
+  mergeSemanticRegionResolverConfig,
+  runSemanticRegionResolver,
+  semanticAuditFields,
+} = require('./semantic_region_resolver');
 
 let emergencyFlush = null;
 
@@ -561,7 +567,7 @@ const DEFAULT_COUNTRY_REGION_KEYWORDS = {
   VN: ['vn', 'viet nam', 'vietnam', 'việt nam'],
   PH: ['ph', 'pinoy', 'philippines', 'pilipinas'],
   ID: ['indo', 'indonesia'],
-  MY: ['malaysia', 'malay', 'melayu', '大马', '大馬', '马来西亚', '馬來西亞'],
+  MY: ['MY', 'malaysia', 'malay', 'melayu', '大马', '大馬', '马来西亚', '馬來西亞'],
   SG: ['sg', 'singapore'],
   BN: ['brunei'],
   LA: ['laos', 'lao'],
@@ -651,13 +657,13 @@ const COUNTRY_CODE_TO_REGION = {
 
 // Short Latin region codes are high-risk tokens. Matching them case-insensitively makes
 // ordinary words such as Spanish/French "de" look like Germany, "Trójmiasto" look like
-// Turkey (TR), and a trademark symbol near text look like Turkmenistan (TM). V5.2 only
+// Turkey (TR), and a trademark symbol near text look like Turkmenistan (TM). Earlier logic only
 // accepts these codes when the original group name contains the code in uppercase and it
 // is not embedded in another Latin-script word. CJK/Hangul immediately after the code is
 // allowed, preserving valid forms such as "HK朋友交換群組".
 const STRICT_UPPERCASE_REGION_CODES = new Set([
   ...Object.keys(COUNTRY_CODE_TO_REGION),
-  'USA', 'DPRK', 'KSA', 'UAE',
+  'USA', 'DPRK', 'KSA', 'UAE', 'SEA',
 ]);
 
 function regionFromCountryCode(countryCode) {
@@ -667,7 +673,7 @@ function regionFromCountryCode(countryCode) {
 
 const DEFAULT_DIRECT_REGION_KEYWORDS = {
   EA: ['east asia', 'eastern asia', 'east asian', '东亚', '東亞'],
-  SEA: ['southeast asia', 'south east asia', 'south-east asia', 'asean', 's.e.a.', 'sea server', 'sea players', 'sea region'],
+  SEA: ['SEA', 'southeast asia', 'south east asia', 'south-east asia', 'asean', 's.e.a.', 'sea server', 'sea players', 'sea region'],
   'Middle East': ['middle east', 'mena', 'gcc', 'gulf countries', 'arab countries', 'arab world', 'arabic', 'arab', 'arabs', 'العرب', 'عرب', 'العربية'],
   'Central Asia': ['central asia', 'central asian'],
   'South Asia': ['south asia', 'south asian'],
@@ -740,7 +746,7 @@ function mergeKeywordMap(base, override) {
 }
 
 const CONTEXT_REQUIRED_REGION_CODES = new Set([
-  'ID', 'IN', 'IT', 'NO', 'TO', 'ME', 'MY', 'LA', 'DE', 'TR', 'TM', 'AT', 'IS', 'BE',
+  'ID', 'IN', 'IT', 'NO', 'TO', 'ME', 'LA', 'DE', 'TR', 'TM', 'AT', 'IS', 'BE',
 ]);
 
 function sanitizeCountryRegionKeywords(regionKeywords) {
@@ -750,9 +756,11 @@ function sanitizeCountryRegionKeywords(regionKeywords) {
     out[region] = list.filter((value) => {
       const normalized = normalizeWords(value).trim();
       const upper = normalized.toUpperCase();
-      // V5.6: high-risk two-letter codes are never accepted as standalone local keywords.
+      // High-risk two-letter codes are never accepted as standalone local keywords.
       // Their country must be proven by a full name, flag, language, city, About location,
-      // or GeoNames. This also protects old task configs containing ID/MY/DE/TR/TM/etc.
+      // or GeoNames. MY is intentionally excluded from this suppression: the
+      // strict uppercase boundary matcher accepts `MY` as Malaysia while lowercase `my`
+      // remains ordinary English and cannot trigger a region.
       if (/^[A-Za-z]{2}$/.test(normalized) && CONTEXT_REQUIRED_REGION_CODES.has(upper)) return false;
       // "Georgia" is ambiguous between the country and the US state. Require a qualified
       // country spelling (Georgia country / საქართველო) or About/GeoNames evidence.
@@ -1019,7 +1027,7 @@ function detectDiscussionLanguageFromPosts(discussionLanguageText) {
 }
 
 function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussionLanguageText, snippet, titlePhrases = []) {
-  // V5.3: game titles are entity labels, not language evidence. Remove the current
+  // Game titles are entity labels, not language evidence. Remove the current
   // game's canonical title, aliases and controlled variants from every language source
   // before scoring scripts/keywords. This prevents English title words such as
   // "Cookie Run Kingdom" from overriding Spanish/Thai/etc. player content.
@@ -1028,7 +1036,7 @@ function detectLanguageSignalFromEvidence(groupName, aboutLanguageText, discussi
   const languageDiscussionText = stripKnownGameTitlesFromText(discussionLanguageText, titlePhrases);
   const languageSnippet = stripKnownGameTitlesFromText(snippet, titlePhrases);
 
-  // V6.2.1: an explicit language/country signal remaining in the group name after
+  // An explicit language/country signal remaining in the group name after
   // game-title masking is stronger than a small discussion sample. This prevents an
   // Arabic/English sample from overriding title evidence such as ไทย, ซื้อขาย or Việt Nam.
   // Generic English words (Global, Community, Trade) do not produce a group-name signal.
@@ -1398,7 +1406,7 @@ function mergeExternalGeocoderConfig(config, configFile, outDir) {
     merged.enabled = boolLike(localExternal.enabled, false);
     merged.enable_source = 'local_config_explicit';
   } else if (clean(merged.username)) {
-    // V5.1: a valid local username/environment variable is sufficient to enable GeoNames
+    // A valid local username/environment variable is sufficient to enable GeoNames
     // when a temporary task_config omitted the entire external_geocoder block.
     merged.enabled = true;
     merged.enable_source = 'auto_credentials';
@@ -1471,7 +1479,7 @@ const GEOCODER_GROUP_NAME_STOPWORDS = new Set([
   'game','games','gaming','mobile','online','roblox','facebook','fb','go','new','old','main','backup','real','all','only','and','the','in','of','a','an','america','asia',
   'event','events','chat','discussion','discussions','remote','raid','raids','raiding','invite','invites','daily','level','trusted','store','stores','hosting','fest','promo','promos','unlimited',
   'add','here','come','together','goers','area','arena','bay','network','club','clubs','admin','admins','season','wide','free','rare','home','regional','only','more','ladies',
-  'talk','town','green','classic','ovenbreak','cookie','cookierun','kingdom','rangers','linerangers','line','idle',
+  'talk','town','green','classic','ovenbreak','cookie','cookierun','kingdom','rangers','linerangers','line','idle','drama',
   'state','province','county','city','region','surroundings','alrededores','alentours','solo','intercambios','et','triangle',
   'spam','spam-free','family','friendly','communitytcg',
   'san','santa','santo','saint','st','fort','new','north','south','east','west','puerto','beach',
@@ -1497,7 +1505,7 @@ const GEOCODER_GROUP_NAME_STOPWORDS = new Set([
   // Korean/Japanese/Chinese generic group-language tokens. Known city names are handled
   // by the high-confidence city map before GeoNames; these words should not become place
   // queries merely because the group name is a sentence.
-  // V5.6 English operational/community terms observed in multi-month data.
+  // English operational/community terms observed in multi-month data.
   'acc','forum','forums','tournament','tournaments','giveaways','update','updates','fandom','artist','artists','carry','carrying','shop','shops',
   // Vietnamese commerce/community terms. normalizeGeocoderQuery strips diacritics.
   'mua','ban','trao','doi','giao','luu','cong','dong','hoi','nhom','cho','tai','khoan','quoc','te','toan','thu','nguoi','choi','giftcode','nap',
@@ -1526,12 +1534,12 @@ const GEOCODER_GENERIC_QUERY_PHRASES = new Set([
 // such as "Las Vegas", "New York", "Fort Worth", or "Washington State" before removing
 // generic words, but do not preserve phrases like "Edinburgh Community" or "Raid Invites".
 
-// V5.6: words below may be real places, but they are too ambiguous to query alone from a
+// Words below may be real places, but they are too ambiguous to query alone from a
 // Facebook group name. They may still appear inside a qualified multiword place phrase
 // such as Orange County, Victoria BC, Georgia USA, or Santa Rosa.
 const GEOCODER_CONTEXT_RESTRICTED_SINGLE_TERMS = new Set([
   'bay','santa','solo','mobile','town','orange','victoria','georgia','phoenix','classic','kingdom','beta','mania','league','world','global','hendo','latham','kuning',
-  'green','yellow','red','blue','black','white','wide','selling','gift','trades','trade','level','store','come','add','amis','comunidad','compra','quoc','jual','mua','ban',
+  'green','yellow','red','blue','black','white','wide','selling','gift','trades','trade','level','store','come','add','amis','comunidad','compra','quoc','jual','mua','ban','drama',
 ]);
 
 const GEOCODER_CONTEXT_RESTRICTED_PHRASES = new Set([
@@ -1554,7 +1562,7 @@ const GEOCODER_CJK_NOISE_FRAGMENTS = [
   '限定','玩家','粉絲','粉丝','朋友','交換','交换','遊戲','游戏','官方','專屬','专属','專區','专区','買賣專區','买卖专区','資訊','资讯','詢問','询问','第二群組','第二群组',
 ];
 
-// V5.5: remove high-frequency commerce/community fragments before GeoNames candidate
+// Remove high-frequency commerce/community fragments before GeoNames candidate
 // generation. These fragments routinely form valid words but are not geographic evidence.
 const GEOCODER_MULTILINGUAL_NOISE_FRAGMENTS = [
   // Thai. Long fragments come first so concatenated commerce phrases are removed cleanly.
@@ -1648,7 +1656,7 @@ function removeKnownTitleWords(words, titles) {
   }
   return words.filter((w) => {
     if (remove.has(w)) return false;
-    // V5.6: never carve a residual substring out of a token containing a known game
+    // Never carve a residual substring out of a token containing a known game
     // entity. PokeMonedas/Pok'emon-style tokens are discarded as a whole instead of
     // producing "edas", "pok", etc. that GeoNames may accept as places.
     for (const titleWord of remove) {
@@ -1755,6 +1763,66 @@ function extractGeocoderQueriesFromGroupName(groupName, gameTitlePhrases, maxQue
   }
 
   return unique(candidates).slice(0, Math.max(1, maxQueries || 4));
+}
+
+
+const SEMANTIC_REGION_RISK_TERMS = new Set([
+  'drama','solo','mobile','town','orange','victoria','georgia','phoenix','classic','kingdom','beta','mania','league','world','global','hendo','latham','kuning',
+  'green','yellow','red','blue','black','white','talk','amis','comunidad','compra','quoc','jual','beli','mua','ban','วิน','ขาย','ซื้อ','ซื้อขาย','عشاق','كل','فيفا',
+]);
+
+const SEMANTIC_REGION_RISK_PHRASES = new Set([
+  'green town','town talk','talk trade','talk and trade','jual beli','mua ban','ovenbreak classic','bay area','world wide','come together',
+]);
+
+function detectSemanticRegionRisk(groupName, gameTitlePhrases, externalGeocoder, semanticConfig) {
+  const original = clean(groupName || '');
+  const titles = expandKnownGameTitlePhrases(gameTitlePhrases || []);
+  const residual = clean(stripKnownGameTitlesFromText(removeAsciiTranslationParentheses(original), titles).replace(/[™®©℠]/g, ' '));
+  const normalized = normalizeGeocoderQuery(residual);
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const safeQueries = extractGeocoderQueriesFromGroupName(original, titles, externalGeocoder?.max_queries_per_group || 4);
+  const riskTerms = unique(words.filter((word) => SEMANTIC_REGION_RISK_TERMS.has(word)));
+  for (const phrase of SEMANTIC_REGION_RISK_PHRASES) {
+    if (normalized.includes(phrase)) riskTerms.push(phrase);
+  }
+  const uniqueRiskTerms = unique(riskTerms);
+  if (semanticConfig?.trigger_mode === 'all_unresolved' && residual) {
+    return {
+      trigger: true,
+      reason: uniqueRiskTerms.length ? `all_unresolved_with_risk:${uniqueRiskTerms.join(',')}` : 'all_unresolved',
+      risk_terms: uniqueRiskTerms,
+      residual_group_name: residual,
+      safe_queries: safeQueries,
+    };
+  }
+  if (uniqueRiskTerms.length) {
+    return {
+      trigger: true,
+      reason: `risk_terms:${uniqueRiskTerms.join(',')}`,
+      risk_terms: uniqueRiskTerms,
+      residual_group_name: residual,
+      safe_queries: safeQueries,
+    };
+  }
+  return {
+    trigger: false,
+    reason: '',
+    risk_terms: [],
+    residual_group_name: residual,
+    safe_queries: safeQueries,
+  };
+}
+
+function deterministicRegionFromSemanticTokens({
+  semanticResult,
+  countryRegionKeywords,
+  directRegionKeywords,
+  aboutLocationCityKeywords,
+}) {
+  const tokens = Array.isArray(semanticResult?.explicit_regions) ? semanticResult.explicit_regions : [];
+  if (!tokens.length) return { region: '', source: '', keyword_hits: [] };
+  return detectRegionByGroupName(tokens.join(' / '), countryRegionKeywords, directRegionKeywords, aboutLocationCityKeywords);
 }
 
 function extractGeocoderQueriesFromAboutLocation(aboutLocationText, maxQueries) {
@@ -2074,9 +2142,9 @@ async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
     return { status: 'unsafe_query', source, query: normalizedQuery, reason: safety.reason };
   }
   const endpointKey = normalizeGeonamesEndpoint(externalGeocoder.endpoint);
-  // V5.6 cache namespace invalidates earlier accepted false positives and separates the
-  // stricter group-name evaluation from explicit About > Location lookups.
-  const cacheKey = `geonames-v5.6|${endpointKey}|${source}|${normalizedQuery}`;
+  // V6.5 cache namespace separates semantic-authorized lookups from legacy cached decisions and keeps the
+  // stricter group-name evaluation separate from explicit About > Location lookups.
+  const cacheKey = `geonames-v6.5|${endpointKey}|${source}|${normalizedQuery}`;
   const cached = cache ? cache.get(cacheKey) : null;
   if (cached) {
     if (stats) stats.external_geocoder_cache_hits = (stats.external_geocoder_cache_hits || 0) + 1;
@@ -2085,7 +2153,7 @@ async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
   if (stats) stats.external_geocoder_requests = (stats.external_geocoder_requests || 0) + 1;
   const response = await geonamesRequestWithRetry(normalizedQuery, username, externalGeocoder, stats);
   let evaluated = evaluateGeonamesResults(normalizedQuery, response, externalGeocoder.min_confidence, externalGeocoder.ambiguity_margin);
-  // V5.5: a group-name query is fuzzy context, unlike an explicit About > Location value.
+  // A group-name query is fuzzy context, unlike an explicit About > Location value.
   // Accept it only when GeoNames confirms the queried phrase as an exact primary/alternate
   // place name. This rejects jual -> Kampung Telok Jual, talk -> Town Talk and วิน -> Winnipeg.
   if (source === 'group_name' && evaluated.status === 'accepted') {
@@ -2122,12 +2190,16 @@ async function runExternalGeocoderFallback({
   geocodeCache,
   stats,
   preferredSources,
+  overrideGroupNameQueries,
 }) {
   if (!externalGeocoder || !externalGeocoder.enabled) return { status: 'disabled' };
   const sources = Array.isArray(preferredSources) && preferredSources.length ? preferredSources : externalGeocoder.sources;
   const querySpecs = [];
   if (sources.includes('group_name')) {
-    for (const q of extractGeocoderQueriesFromGroupName(groupName, gameTitlePhrases, externalGeocoder.max_queries_per_group)) {
+    const groupQueries = Array.isArray(overrideGroupNameQueries)
+      ? overrideGroupNameQueries.map((item) => clean(item)).filter(Boolean)
+      : extractGeocoderQueriesFromGroupName(groupName, gameTitlePhrases, externalGeocoder.max_queries_per_group);
+    for (const q of groupQueries) {
       querySpecs.push({ source: 'group_name', query: q });
     }
   }
@@ -2206,6 +2278,14 @@ function hasMultipleRegionEvidence(regionMatch) {
   return distinctMatchedRegions(regionMatch).length > 1;
 }
 
+// A group name that explicitly advertises both Southeast Asia and Europe is
+// multi-region by definition. About location describes an admin/profile location and must
+// not collapse this declared audience coverage to only SEA or EUR.
+function hasSeaEuropeDeclaredCoverageConflict(regionMatch) {
+  const regions = new Set(distinctMatchedRegions(regionMatch));
+  return regions.has('SEA') && regions.has('EUR');
+}
+
 function isAboutRegionCompatibleWithGroupEvidence(aboutRegion, groupNameMatch) {
   const about = normalizeRegionOutput(aboutRegion);
   if (!about) return false;
@@ -2232,12 +2312,29 @@ async function resolveRegionV5({
   aboutLocationText,
   externalGeocoder,
   geocodeCache,
+  semanticRegionResolver,
+  semanticRegionCache,
   stats,
   gameTitlePhrases,
 }) {
   const normalizedLocation = clean(aboutLocationText || '');
-  const groupNameMatch = detectRegionByGroupName(groupName, countryRegionKeywords, directRegionKeywords, aboutLocationCityKeywords);
+  // Region keywords must come from text outside known game titles. This prevents a game
+  // title containing a geographic token from being mistaken for the group's audience.
+  const regionEvidenceGroupName = clean(stripKnownGameTitlesFromText(groupName, gameTitlePhrases));
+  const groupNameMatch = detectRegionByGroupName(regionEvidenceGroupName, countryRegionKeywords, directRegionKeywords, aboutLocationCityKeywords);
   const groupNameHasMultipleRegions = hasMultipleRegionEvidence(groupNameMatch);
+
+  if (hasSeaEuropeDeclaredCoverageConflict(groupNameMatch)) {
+    return {
+      region: '',
+      source: 'keyword_conflict_sea_europe_declared_coverage',
+      group_name_match: groupNameMatch,
+      about_location_match: { region: '', source: '', keyword_hits: [] },
+      about_location: normalizedLocation,
+      used_about_location: false,
+      external_geocoder: { status: 'skipped_keyword_conflict' },
+    };
+  }
 
   // Explicit group-name geography remains the strongest evidence. When multiple distinct
   // regions are present, About > Location must adjudicate before any broad-region fallback.
@@ -2318,7 +2415,7 @@ async function resolveRegionV5({
     };
   }
 
-  // V5.5 priority for otherwise unresolved groups:
+  // Priority for otherwise unresolved groups:
   // explicit About location (local rules -> GeoNames), then high-confidence language, and
   // only then fuzzy group-name GeoNames. This prevents a generic group-name word from
   // outranking Bangkok/Simla in About or Thai/Indonesian player-language evidence.
@@ -2376,6 +2473,153 @@ async function resolveRegionV5({
     };
   }
 
+  const semanticRisk = detectSemanticRegionRisk(groupName, gameTitlePhrases, externalGeocoder, semanticRegionResolver);
+  let semanticResult = {
+    status: semanticRisk.trigger ? 'disabled' : 'not_triggered',
+    trigger_reason: semanticRisk.reason || '',
+  };
+  if (semanticRisk.trigger && semanticRegionResolver?.enabled) {
+    if (stats) stats.semantic_region_risk_detected = (stats.semantic_region_risk_detected || 0) + 1;
+    semanticResult = await runSemanticRegionResolver({
+      config: semanticRegionResolver,
+      cache: semanticRegionCache,
+      stats,
+      context: {
+        groupName,
+        residualGroupName: semanticRisk.residual_group_name,
+        aboutLocationText: normalizedLocation,
+        triggerReason: semanticRisk.reason,
+        riskTerms: semanticRisk.risk_terms,
+        safeQueries: semanticRisk.safe_queries,
+        deterministicEvidence: formatRegionKeywordHits(groupNameMatch, aboutLocationMatch).split('|').filter(Boolean),
+      },
+    });
+    semanticResult.trigger_reason = semanticRisk.reason || '';
+
+    const semanticAccepted = semanticResult.status === 'accepted';
+    if (semanticAccepted && (
+      semanticResult.location_intent === 'non_location'
+      || semanticResult.scope === 'multi_region'
+      || semanticResult.scope === 'global'
+      || semanticResult.location_intent === 'ambiguous'
+    )) {
+      if (stats) stats.semantic_region_geonames_suppressed = (stats.semantic_region_geonames_suppressed || 0) + 1;
+      return {
+        region: '',
+        source: semanticResult.scope === 'multi_region' || semanticResult.scope === 'global'
+          ? `semantic_${semanticResult.scope}`
+          : `semantic_${semanticResult.location_intent}`,
+        group_name_match: groupNameMatch,
+        about_location_match: aboutLocationMatch,
+        about_location: normalizedLocation,
+        used_about_location: false,
+        external_geocoder: { status: 'suppressed_by_semantic_model' },
+        semantic_region: semanticResult,
+      };
+    }
+
+    if (semanticAccepted && semanticResult.location_intent === 'location' && semanticResult.scope === 'single_region') {
+      if (semanticRegionResolver.allow_model_explicit_region_lock) {
+        const semanticTokenMatch = deterministicRegionFromSemanticTokens({
+          semanticResult,
+          countryRegionKeywords,
+          directRegionKeywords,
+          aboutLocationCityKeywords,
+        });
+        if (semanticTokenMatch.region && semanticTokenMatch.source !== 'keyword_conflict') {
+          if (stats) stats.semantic_region_direct_locks = (stats.semantic_region_direct_locks || 0) + 1;
+          return {
+            region: normalizeRegionOutput(semanticTokenMatch.region),
+            source: 'semantic_explicit_token_deterministic_lock',
+            group_name_match: semanticTokenMatch,
+            about_location_match: aboutLocationMatch,
+            about_location: normalizedLocation,
+            used_about_location: false,
+            external_geocoder: { status: 'not_needed' },
+            semantic_region: semanticResult,
+          };
+        }
+      }
+
+      const semanticPlaces = Array.isArray(semanticResult.candidate_places) ? semanticResult.candidate_places : [];
+      if (semanticPlaces.length) {
+        if (stats) stats.semantic_region_geonames_allowed = (stats.semantic_region_geonames_allowed || 0) + 1;
+        const geoSemantic = await runExternalGeocoderFallback({
+          groupName,
+          aboutLocationText: '',
+          gameTitlePhrases,
+          externalGeocoder,
+          geocodeCache,
+          stats,
+          preferredSources: ['group_name'],
+          overrideGroupNameQueries: semanticPlaces,
+        });
+        if (geoSemantic.status === 'accepted' && geoSemantic.region) {
+          return {
+            region: normalizeRegionOutput(geoSemantic.region),
+            source: 'semantic_authorized_external_geocoder',
+            group_name_match: groupNameMatch,
+            about_location_match: aboutLocationMatch,
+            about_location: normalizedLocation,
+            used_about_location: false,
+            external_geocoder: geoSemantic,
+            semantic_region: semanticResult,
+          };
+        }
+        return {
+          region: '',
+          source: geoSemantic.status === 'ambiguous' ? 'semantic_authorized_geocoder_ambiguous' : 'semantic_authorized_geocoder_unresolved',
+          group_name_match: groupNameMatch,
+          about_location_match: aboutLocationMatch,
+          about_location: normalizedLocation,
+          used_about_location: false,
+          external_geocoder: geoSemantic,
+          semantic_region: semanticResult,
+        };
+      }
+
+      if (stats) stats.semantic_region_geonames_suppressed = (stats.semantic_region_geonames_suppressed || 0) + 1;
+      return {
+        region: '',
+        source: 'semantic_location_without_supported_candidate',
+        group_name_match: groupNameMatch,
+        about_location_match: aboutLocationMatch,
+        about_location: normalizedLocation,
+        used_about_location: false,
+        external_geocoder: { status: 'suppressed_no_supported_candidate' },
+        semantic_region: semanticResult,
+      };
+    }
+
+    if (semanticResult.status === 'low_confidence' && semanticRegionResolver.fail_closed_on_low_confidence) {
+      if (stats) stats.semantic_region_geonames_suppressed = (stats.semantic_region_geonames_suppressed || 0) + 1;
+      return {
+        region: '',
+        source: 'semantic_low_confidence_unmapped',
+        group_name_match: groupNameMatch,
+        about_location_match: aboutLocationMatch,
+        about_location: normalizedLocation,
+        used_about_location: false,
+        external_geocoder: { status: 'suppressed_by_semantic_low_confidence' },
+        semantic_region: semanticResult,
+      };
+    }
+
+    if (!['accepted', 'low_confidence', 'rules_only_fallback'].includes(semanticResult.status) && semanticRegionResolver.fail_closed_on_error) {
+      if (stats) stats.semantic_region_geonames_suppressed = (stats.semantic_region_geonames_suppressed || 0) + 1;
+      return {
+        region: '',
+        source: 'semantic_error_unmapped',
+        group_name_match: groupNameMatch,
+        about_location_match: aboutLocationMatch,
+        about_location: normalizedLocation,
+        used_about_location: false,
+        external_geocoder: { status: 'suppressed_by_semantic_error' },
+        semantic_region: semanticResult,
+      };
+    }
+  }
+
   const geoGroup = groupNameMatch.source === 'keyword_conflict'
     ? { status: 'skipped_keyword_conflict' }
     : await runExternalGeocoderFallback({
@@ -2396,6 +2640,7 @@ async function resolveRegionV5({
       about_location: normalizedLocation,
       used_about_location: false,
       external_geocoder: geoGroup,
+      semantic_region: semanticResult,
     };
   }
 
@@ -2410,6 +2655,7 @@ async function resolveRegionV5({
     about_location: normalizedLocation,
     used_about_location: false,
     external_geocoder,
+    semantic_region: semanticResult,
   };
 }
 
@@ -2748,7 +2994,7 @@ function matchGame(profile, groupName, aboutText, snippet) {
 }
 
 
-// V5.7: phase-2 candidate-name prefilter.
+// Phase-2 candidate-name prefilter.
 // First-round search cards already contain a group_name in normal runs. Use that
 // cheap evidence before opening /about or the discussion feed. The prefilter only
 // rejects a candidate when the card name is present, complete enough to judge, and
@@ -3636,6 +3882,8 @@ function resolveCollisions(rows) {
     : null;
   const externalGeocoder = mergeExternalGeocoderConfig(config, configFile, path.dirname(outXlsx));
   const geocodeCache = new GeocodeCache(externalGeocoder.cache_file);
+  const semanticRegionResolver = mergeSemanticRegionResolverConfig(config, configFile, path.dirname(outXlsx));
+  const semanticRegionCache = new SemanticRegionCache(semanticRegionResolver.cache_file);
 
   const index = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
   const gameEntries = Array.isArray(index.games) ? index.games : [];
@@ -3741,6 +3989,35 @@ function resolveCollisions(rows) {
       external_geocoder_filtered_queries: 0,
       external_geocoder_rejected_context: 0,
       external_geocoder_context_restricted_queries: 0,
+      semantic_region_enabled: semanticRegionResolver.enabled ? 1 : 0,
+      semantic_region_enable_source: semanticRegionResolver.enable_source || '',
+      semantic_region_provider: semanticRegionResolver.provider_priority || '',
+      semantic_region_model: semanticRegionResolver.model || '',
+      semantic_region_codex_exec_available: semanticRegionResolver.codex_exec?.available ? 1 : 0,
+      semantic_region_codex_exec_candidate_count: semanticRegionResolver.codex_exec?.usable_candidates?.length || 0,
+      semantic_region_codex_exec_windowsapps_alias_rejected: semanticRegionResolver.codex_exec?.candidates?.some((item) => item.rejection_reason === 'windowsapps_app_execution_alias_not_background_safe') ? 1 : 0,
+      semantic_region_codex_exec_preflight_ok: 0,
+      semantic_region_codex_exec_candidate_failures: 0,
+      semantic_region_custom_api_configured: semanticRegionResolver.api_providers?.filter((item) => item.configured).length || 0,
+      semantic_region_risk_detected: 0,
+      semantic_region_requests: 0,
+      semantic_region_retries: 0,
+      semantic_region_codex_exec_requests: 0,
+      semantic_region_codex_exec_errors: 0,
+      semantic_region_custom_api_requests: 0,
+      semantic_region_custom_api_errors: 0,
+      semantic_region_provider_fallbacks: 0,
+      semantic_region_rules_only_fallbacks: 0,
+      semantic_region_cache_hits: 0,
+      semantic_region_location: 0,
+      semantic_region_non_location: 0,
+      semantic_region_multi_or_global: 0,
+      semantic_region_ambiguous: 0,
+      semantic_region_low_confidence: 0,
+      semantic_region_errors: 0,
+      semantic_region_direct_locks: 0,
+      semantic_region_geonames_allowed: 0,
+      semantic_region_geonames_suppressed: 0,
       game_breakdown: {},
     };
     const formulaFields = {
@@ -3769,6 +4046,19 @@ function resolveCollisions(rows) {
       '__region_source',
       '__region_keyword_hits',
       '__region_location',
+      '__semantic_provider',
+      '__semantic_model',
+      '__semantic_status',
+      '__semantic_trigger',
+      '__semantic_location_intent',
+      '__semantic_scope',
+      '__semantic_confidence',
+      '__semantic_candidate_places',
+      '__semantic_explicit_regions',
+      '__semantic_reason',
+      '__semantic_cached',
+      '__semantic_provider_chain',
+      '__semantic_fallback_reason',
       '__geocoder_provider',
       '__geocoder_status',
       '__geocoder_source',
@@ -3848,7 +4138,7 @@ function resolveCollisions(rows) {
       && progressFileState.progress
     );
     const checkpointProgress = resumeState && resumeState.progress ? resumeState.progress : null;
-    // V6.0 safety rule: never advance beyond the cursor stored with the full row payload.
+    // Safety rule: never advance beyond the cursor stored with the full row payload.
     // phase2_progress.json is observational only; it cannot move the recovery cursor forward.
     const resumeProgress = checkpointProgress || {};
     const resumeStats = resumeState && resumeState.stats && typeof resumeState.stats === 'object'
@@ -3950,7 +4240,7 @@ function resolveCollisions(rows) {
         stats,
       });
 
-      // V6.0 writes the complete recoverable payload after every candidate.
+      // Write the complete recoverable payload after every candidate.
       // This keeps detail rows, manual-review rows, stats and cursor in one atomic checkpoint.
       if (shouldWriteFullState) {
         const checkpoint = {
@@ -4050,7 +4340,7 @@ function resolveCollisions(rows) {
             candidateCheckpointWritten = true;
           }
           lastCandidateStatus = status;
-          // V6.0 durability: persist the complete row payload and cursor after every candidate,
+          // Durability: persist the complete row payload and cursor after every candidate,
           // including rejected and manual-review candidates. The partial workbook remains accepted-row only.
           writePartialCheckpoint({
             stage: 'candidate_processed',
@@ -4135,6 +4425,8 @@ function resolveCollisions(rows) {
           aboutLocationText,
           externalGeocoder,
           geocodeCache,
+          semanticRegionResolver,
+          semanticRegionCache,
           stats,
           gameTitlePhrases: geocoderExcludedTitlePhrases,
         });
@@ -4170,6 +4462,7 @@ function resolveCollisions(rows) {
           __region_source: regionResolution.source || '',
           __region_keyword_hits: formatRegionKeywordHits(regionResolution.group_name_match, regionResolution.about_location_match),
           __region_location: aboutLocationText,
+          ...semanticAuditFields(regionResolution.semantic_region),
           ...geocoderAuditFields(regionResolution.external_geocoder),
         };
 
@@ -4274,6 +4567,8 @@ function resolveCollisions(rows) {
           aboutLocationText,
           externalGeocoder,
           geocodeCache,
+          semanticRegionResolver,
+          semanticRegionCache,
           stats,
           gameTitlePhrases: geocoderExcludedTitlePhrases,
         });
@@ -4283,6 +4578,7 @@ function resolveCollisions(rows) {
         row.__region_source = regionResolution.source || '';
         row.__region_keyword_hits = formatRegionKeywordHits(regionResolution.group_name_match, regionResolution.about_location_match);
         row.__region_location = aboutLocationText;
+        Object.assign(row, semanticAuditFields(regionResolution.semantic_region));
         Object.assign(row, geocoderAuditFields(regionResolution.external_geocoder));
 
         if (allowedLanguageSignals && allowedLanguageSignals.size && !allowedLanguageSignals.has(row.language_signal)) {
@@ -4523,7 +4819,7 @@ function resolveCollisions(rows) {
             shutdownBefore: normalizedShutdownBefore,
             scheduledTaskName,
           });
-          // Compatibility path for direct invocations that do not use the V6.3 runner coordinator.
+          // Compatibility path for direct invocations that do not use the scheduled runner coordinator.
         }
         writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
           status: shutdownResult.ok

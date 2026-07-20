@@ -263,7 +263,7 @@ try {
   if (-not [string]::IsNullOrWhiteSpace([string]$m.shutdown_policy_file)) {
     $nodeArgs.Add('--shutdown-policy-file') | Out-Null; $nodeArgs.Add([string]$m.shutdown_policy_file) | Out-Null
   } elseif ([bool]$m.shutdown_after_complete -or -not [string]::IsNullOrWhiteSpace([string]$m.shutdown_before)) {
-    # Backward compatibility for manifests created before V6.2.2.
+    # Backward compatibility for older manifests.
     $nodeArgs.Add('--shutdown-after-complete') | Out-Null; $nodeArgs.Add('true') | Out-Null
     $nodeArgs.Add('--shutdown-delay-seconds') | Out-Null; $nodeArgs.Add([string]$m.shutdown_delay_seconds) | Out-Null
     if (-not [string]::IsNullOrWhiteSpace([string]$m.shutdown_before)) {
@@ -344,7 +344,7 @@ finally {
       Start-DeferredTaskCleanup -Name $TaskName -ManifestPath $Manifest -StatusPath $RunnerStatus -BootstrapPath $BootstrapPath
     }
 
-    # V6.3: the already-running hidden PowerShell runner is the shutdown coordinator.
+    # The already-running hidden PowerShell runner is the shutdown coordinator.
     # This avoids spawning a detached watcher that can receive a PID but die before its first log/status write.
     if ($nodePhase2Executed -and $exitCode -eq 0 -and (Test-Path -LiteralPath $ShutdownCoordinatorScript)) {
       try {

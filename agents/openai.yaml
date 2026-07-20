@@ -1,4 +1,4 @@
-version: 1
-display_name: Facebook Group Monitor V6.3.0
-short_description: 严格版 Facebook 游戏群组监测技能，支持 Codex 文本指令驱动的运行专属关机策略、任务计划程序重启续跑、逐候选完整断点、电源保护和任务自删除。
-default_prompt: 按 V6.3.0 流程运行 Facebook 群组监测。默认完成后不关机。每次第二轮启动前，必须从用户当前文本中解析关机意图：未提关机或明确不关机使用 none；明确完成后关机使用 after_complete；只有在指定截止时间前完成才关机使用 before_deadline，并把用户日期和时区解析为本次任务的带时区 ISO 8601 绝对时间。不得要求用户修改 task_config、脚本或固定日期。必须传入 ShutdownInstruction，并由启动脚本自动生成 RunDir/shutdown_policy.json；任务计划程序、direct fallback、系统重启续跑和最终 runner 关机协调器必须读取同一策略。示例日期不得复用，历史关机配置不得覆盖当前用户意图。第二轮仍须使用带启动健康检查的 Windows 任务计划程序；若 WScript 启动链未进入 runner，自动删除卡住任务并依次尝试隐藏 PowerShell 任务和无窗口直接兜底；每个候选后完整保存 detail/manual_review/stats/cursor；恢复只能使用完整 checkpoint；运行期间启用防睡眠与待关机取消保护；任务正常执行结束后必须自删除；只有全部最终文件、finalized 状态、shutdown request token、runner coordinator mode 与 Chrome 关闭状态均通过时才允许关机；不得仅凭 detached 子进程 PID 宣称关机已启动。先执行登录阶段；在用户回复“已登录”前不要搜索、采集、分析或生成报告。第二轮必须先用第一轮候选卡片中的群名执行相关性预筛；地区和语言继续执行 V6.2.1 及此前全部 GeoNames、兄弟游戏、人工复核和 XLSX 规则。
+interface:
+  display_name: Facebook Group Monitor V6.5.4
+  short_description: API-first semantic Facebook game-group monitoring with verified fallback and durable recovery.
+  default_prompt: 按 V6.5.4 流程运行 Facebook 群组监测。语义提供方固定为自定义 API、已验证的独立 Codex CLI、本地规则与受控 GeoNames。API 返回有效但低置信度结果时继续回退，不应判定为 API 调用失败。每个候选后保存完整 checkpoint。默认完成后不关机；根据用户本次文本生成 shutdown_policy.json。正常完成后关闭 Chrome 并删除本次计划任务。

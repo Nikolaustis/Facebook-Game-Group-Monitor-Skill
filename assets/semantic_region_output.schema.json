@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "location_intent": {
+      "type": "string",
+      "enum": ["location", "non_location", "ambiguous"]
+    },
+    "candidate_places": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 4
+    },
+    "explicit_regions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 6
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["single_region", "multi_region", "global", "unknown"]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 500
+    }
+  },
+  "required": [
+    "location_intent",
+    "candidate_places",
+    "explicit_regions",
+    "scope",
+    "confidence",
+    "reason"
+  ]
+}

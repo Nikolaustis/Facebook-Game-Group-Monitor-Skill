@@ -159,7 +159,7 @@ function Set-ManifestLauncherMode([string]$ManifestPath, [string]$Mode) {
 
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
-# V6.2.2: shutdown intent is resolved from the current Codex prompt into a run-local
+# Shutdown intent is resolved from the current Codex prompt into a run-local
 # shutdown_policy.json. The user never needs to edit task_config.json or a fixed date.
 $legacyDeadline = if (-not [string]::IsNullOrWhiteSpace($ShutdownDeadline)) { $ShutdownDeadline } else { $ShutdownBefore }
 $ResolvedShutdownMode = ([string]$ShutdownMode).Trim().ToLowerInvariant()
@@ -176,10 +176,10 @@ if ($ResolvedShutdownMode -eq 'auto') {
 $ShutdownBefore = ''
 if ($ResolvedShutdownMode -eq 'before_deadline') {
   if ([string]::IsNullOrWhiteSpace($legacyDeadline)) {
-    throw "ShutdownMode=before_deadline 时必须提供 -ShutdownDeadline（或兼容参数 -ShutdownBefore），且时间必须带时区。"
+    throw "ShutdownMode=before_deadline requires -ShutdownDeadline (or legacy -ShutdownBefore) with a timezone."
   }
   try { $ShutdownBefore = ([DateTimeOffset]::Parse($legacyDeadline)).ToString('o') }
-  catch { throw "-ShutdownDeadline 必须是带时区的 ISO 8601 时间，格式如 YYYY-MM-DDTHH:mm:ss+08:00。" }
+  catch { throw "-ShutdownDeadline must be an ISO 8601 timestamp with a timezone, such as YYYY-MM-DDTHH:mm:ss+08:00." }
 } elseif ($ResolvedShutdownMode -eq 'after_complete') {
   $ShutdownBefore = ''
 } elseif ($ResolvedShutdownMode -eq 'none') {
@@ -217,8 +217,8 @@ $shutdownPolicyPayload = [ordered]@{
 }
 Write-JsonAtomic $ShutdownPolicyFile $shutdownPolicyPayload
 
-# V6.2: phase2 defaults to a resilient, fully hidden Task Scheduler chain.
-# A generated one-argument bootstrap removes V6.1's multi-layer quoting failure.
+# Phase 2 defaults to a resilient, fully hidden Task Scheduler chain.
+# A generated one-argument bootstrap avoids multi-layer quoting failures.
 # Startup is actively verified. A stuck WScript task is removed and retried with a
 # direct hidden Task Scheduler action; if that also fails, a hidden direct process
 # starts from the same complete checkpoint rather than silently doing nothing.
@@ -227,7 +227,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     $candidateIndex = Join-Path $RunDir "phase1_index.json"
     if (Test-Path $candidateIndex) { $Index = $candidateIndex }
   }
-  if ([string]::IsNullOrWhiteSpace($Index)) { throw "phase2 需要 -Index，或 -RunDir 中已存在 phase1_index.json。" }
+  if ([string]::IsNullOrWhiteSpace($Index)) { throw "phase2 requires -Index, or phase1_index.json in -RunDir." }
   $Index = (Resolve-Path $Index).Path
   if (-not [string]::IsNullOrWhiteSpace($Config)) { $Config = (Resolve-Path $Config).Path }
 
@@ -269,13 +269,13 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
         runner_pid = $existingHealth.runner_pid
         run_dir = $RunDir
         started_at = (Get-Date).ToString('o')
-        note = '检测到存活的 runner 进程，未覆盖 manifest，也未创建重复实例。'
+        note = 'A live runner was detected; the manifest was preserved and no duplicate instance was created.'
       }
       Write-JsonAtomic $StatusFile $existingStatus
       $existingStatus | ConvertTo-Json -Depth 7
       exit 0
     }
-    # V6.1 could leave WScript in Running while no runner existed. Do not treat it as healthy.
+    # WScript may remain Running while no runner exists. Do not treat it as healthy.
     Remove-ScheduledTaskRobust $ScheduledTaskName
   } elseif ($existingTask) {
     Remove-ScheduledTaskRobust $ScheduledTaskName
@@ -366,7 +366,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
       $arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Bootstrap`""
       $action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument $arguments -WorkingDirectory $RootDir
     }
-    Register-ScheduledTask -TaskName $ScheduledTaskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description "Facebook Group Monitor phase 2 V6.2; verified startup; reboot-resumable; self-deletes after execution." -Force | Out-Null
+    Register-ScheduledTask -TaskName $ScheduledTaskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description "Facebook Group Monitor V6.5.4 phase 2; verified startup; reboot-resumable; self-deletes after execution." -Force | Out-Null
     Start-ScheduledTask -TaskName $ScheduledTaskName
   }
 
@@ -425,7 +425,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
         }
         Write-JsonAtomic $SchedulerDiagnostic $diagnostic
         Remove-Item -Force -LiteralPath $Manifest,$Bootstrap -ErrorAction SilentlyContinue
-        throw "V6.2 三种隐藏启动方式均未进入 runner。诊断文件：$SchedulerDiagnostic"
+        throw "三种隐藏启动方式均未进入 runner。诊断文件：$SchedulerDiagnostic"
       }
     }
   }
@@ -476,9 +476,9 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     shutdown_delay_seconds = $ShutdownDelaySeconds
     shutdown_validation = "final_xlsx + summary + collision + audit + debug_rows + finalized checkpoint + finalized progress + shutdown request token + runner coordinator"
     note = if ($effectiveMode -eq 'hidden_direct_emergency_fallback') {
-      '任务计划程序两种启动链均未通过健康检查，已自动删除失败任务并使用无窗口直接进程继续；本次不会积累计划任务，但系统重启后需再次手动启动。'
+      'Both scheduler launch paths failed health checks. Failed tasks were removed and a hidden direct process was used; restart recovery is unavailable for this run.'
     } else {
-      '任务计划程序启动已通过 runner PID 健康检查；无空白 PowerShell 窗口。V6.3 由当前 runner 在停止电源保护并删除主任务后直接执行关机协调，不再启动独立 watcher。'
+      'The scheduled runner passed PID health checks with no visible PowerShell window; shutdown coordination remains in the runner.'
     }
   }
   Write-JsonAtomic $StatusFile $status
@@ -521,7 +521,7 @@ if ($Task -eq "login") {
   $lines.Add(($cmd -join ' ')) | Out-Null
   $lines.Add('$exitCode = $LASTEXITCODE') | Out-Null
 } elseif ($Task -eq "phase1") {
-  if ([string]::IsNullOrWhiteSpace($Games)) { throw "phase1 需要 -Games。" }
+  if ([string]::IsNullOrWhiteSpace($Games)) { throw "phase1 requires -Games." }
   $cmd = New-Object System.Collections.Generic.List[string]
   $cmd.Add('& node') | Out-Null
   Add-QuotedArg $cmd (Join-Path $RootDir "scripts\phase1_collect_candidates.js")
@@ -544,7 +544,7 @@ if ($Task -eq "login") {
     $candidateIndex = Join-Path $RunDir "phase1_index.json"
     if (Test-Path $candidateIndex) { $Index = $candidateIndex }
   }
-  if ([string]::IsNullOrWhiteSpace($Index)) { throw "phase2 需要 -Index，或 -RunDir 中已存在 phase1_index.json。" }
+  if ([string]::IsNullOrWhiteSpace($Index)) { throw "phase2 requires -Index, or phase1_index.json in -RunDir." }
   $Index = (Resolve-Path $Index).Path
   $cmd = New-Object System.Collections.Generic.List[string]
   $cmd.Add('& node') | Out-Null
@@ -595,7 +595,7 @@ if ($Task -eq "login") {
   $lines.Add('  $shutdownCoordinatorExitCode = $LASTEXITCODE') | Out-Null
   $lines.Add('}') | Out-Null
 } elseif ($Task -eq "monitor") {
-  if ([string]::IsNullOrWhiteSpace($Games)) { throw "monitor 需要 -Games。" }
+  if ([string]::IsNullOrWhiteSpace($Games)) { throw "monitor requires -Games." }
   $cmd = New-Object System.Collections.Generic.List[string]
   $cmd.Add('&') | Out-Null
   Add-QuotedArg $cmd (Join-Path $RootDir "scripts\run_multi_games_v2.ps1")
@@ -661,7 +661,7 @@ $status = [ordered]@{
   shutdown_watcher_file = (Join-Path $RunDir "conditional_shutdown_watcher_status.json")
   powershell_window_visible = $false
   launch_mode = "hidden_start_process"
-  note = "后台任务已使用隐藏窗口参数启动；当前 PowerShell/Codex 命令会立即结束。"
+  note = "The background task was started with hidden-window settings; the current PowerShell/Codex command can exit."
 }
 $status | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $StatusFile -Encoding UTF8
 $status | ConvertTo-Json -Depth 5

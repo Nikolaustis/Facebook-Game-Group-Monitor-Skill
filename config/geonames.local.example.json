@@ -1,0 +1,8 @@
+{
+  "external_geocoder": {
+    "enabled": true,
+    "provider": "geonames",
+    "username": "YOUR_GEONAMES_USERNAME",
+    "endpoint": "http://api.geonames.org/searchJSON"
+  }
+}

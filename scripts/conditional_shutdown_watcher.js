@@ -1,6 +1,6 @@
 'use strict';
 
-// V6.2.1 compatibility entry point. New runs start conditional_shutdown_watcher.ps1
+// Compatibility entry point. New runs start conditional_shutdown_watcher.ps1
 // directly. This file remains so older launch commands do not fail after an overlay.
 const path = require('path');
 const { spawn } = require('child_process');

@@ -583,6 +583,38 @@
       "trojmiasto"
     ]
   },
+  "semantic_region_resolver": {
+    "enabled": "auto",
+    "provider_order": [
+      "custom_api",
+      "codex_exec",
+      "rules_only"
+    ],
+    "local_config_file": "config/local/semantic_model.local.json",
+    "codex_exec": {
+      "enabled": "auto",
+      "command": "codex",
+      "model": "",
+      "reasoning_effort": "low",
+      "sandbox": "read-only",
+      "skip_git_repo_check": true,
+      "timeout_ms": 90000,
+      "preflight_timeout_ms": 12000,
+      "schema_file": "assets/semantic_region_output.schema.json",
+      "temp_dir": "runs/semantic_codex_temp",
+      "probe_version": true,
+      "require_login_status": true,
+      "diagnostic_file": ""
+    },
+    "trigger_mode": "risk_only",
+    "confidence_threshold": 0.85,
+    "max_calls_per_run": 500,
+    "fallback_on_low_confidence": true,
+    "allow_model_explicit_region_lock": true,
+    "fail_closed_on_low_confidence": true,
+    "fail_closed_on_error": true,
+    "cache_file": "runs/semantic_region_cache.json"
+  },
   "external_geocoder": {
     "enabled": true,
     "provider": "geonames",
