@@ -1,9 +1,21 @@
-﻿---
-name: fb-group-monitor-v6.2.2
-description: 用于 Facebook 游戏群组两阶段监测的严格技能。V6.2.2 默认完成后不关机；Codex 必须把用户在文本框中表达的关机意图解析为本次运行专属 shutdown_policy.json，不得要求用户手动修改配置文件或固定日期。
+---
+name: fb-group-monitor-v6.3.0
+description: 用于 Facebook 游戏群组两阶段监测的严格技能。V6.3.0 默认完成后不关机；Codex 必须把用户在文本框中表达的关机意图解析为本次运行专属 shutdown_policy.json；启用关机时由当前隐藏 runner 同步执行严格校验后的关机协调，不得仅凭新进程 PID 宣称关机已启动。
 ---
 
-# Facebook Group Monitor V6.2.2
+# Facebook Group Monitor V6.3.0
+
+
+## V6.3.0 runner 内关机协调规则
+
+- 任务计划程序和 `phase2:direct-bg` 都必须向 phase2 传入 `--shutdown-coordinator-mode runner`。
+- Node 完成最终报表与 Chrome 关闭后，只能写入 `completed_shutdown_pending_runner`、随机 `shutdown_request_token` 和关机策略；不得另起 detached watcher 后仅凭 PID 报告成功。
+- 当前 runner 必须先停止 runtime power guard，再删除本次主计划任务，然后同步调用 `scripts/verified_shutdown_coordinator.ps1`。
+- 协调器必须重新读取 `shutdown_policy.json` 与 completion，并重新核验最终 XLSX、summary、collision、audit、debug rows、finalized checkpoint、finalized progress、Chrome 关闭状态、request token 和 coordinator mode。
+- 关机尝试必须写入 `shutdown_coordinator_status.json`、`shutdown_coordinator.stdout.log`、`shutdown_coordinator.stderr.log`；任何失败都必须可诊断。
+- `conditional_shutdown_watcher_status.json` 只作为旧状态读取逻辑的兼容副本，不再代表独立 watcher。
+- 强制关机依次使用 runner 内完整路径直接调用、隐藏 `Start-Process`、执行前自删的一次性计划任务。
+- 默认不关机；用户当前文本未明确要求关机、策略无效或严格校验失败时保持开机。
 
 ## V6.2.2 Codex 文本指令驱动的关机策略
 
@@ -59,8 +71,8 @@ npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo
 - 同一 `RunDir` 的任务名固定；已有实例正在运行时，不得覆盖 manifest，不得创建并行重复实例。
 - 每次任务计划程序执行正常结束后，无论成功或脚本错误，都应立即注销自身任务；直接注销失败时启动延迟清理进程。删除成功后同步删除 `scheduled_phase2_manifest.json`。
 - 若系统重启直接中断任务，`finally` 不会执行，任务应保留用于下次登录续跑；续跑正常结束后再自删除。
-- 完成后关机只允许在以下条件全部通过后执行：最终 XLSX、summary、collision、audit、debug rows 存在；autosave 与 progress 均 `finalized=true`；completion 中 `phase2_finalization_verified=true`；Chrome 已关闭；watcher token 一致。
-- 独立关机 watcher 无法启动或任一校验失败时，必须保持开机；禁止直接关机回退。
+- 完成后关机只允许在以下条件全部通过后执行：最终 XLSX、summary、collision、audit、debug rows 存在；autosave 与 progress 均 `finalized=true`；completion 中 `phase2_finalization_verified=true`；Chrome 已关闭；shutdown request token 存在且 coordinator mode 为 runner。
+- runner 关机协调器无法执行或任一校验失败时，必须保持开机；不得把获得子进程 PID 等同于关机成功。
 
 启动命令：
 

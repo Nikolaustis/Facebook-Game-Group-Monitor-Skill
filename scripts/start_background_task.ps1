@@ -1,4 +1,4 @@
-﻿param(
+param(
   [Parameter(Mandatory = $true)]
   [ValidateSet("login", "validate-login", "phase1", "phase2", "monitor")]
   [string]$Task,
@@ -474,11 +474,11 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     shutdown_after_complete = [bool]$EffectiveShutdownAfterComplete
     shutdown_before = $ShutdownBefore
     shutdown_delay_seconds = $ShutdownDelaySeconds
-    shutdown_validation = "final_xlsx + summary + collision + audit + debug_rows + finalized checkpoint + finalized progress + completion token"
+    shutdown_validation = "final_xlsx + summary + collision + audit + debug_rows + finalized checkpoint + finalized progress + shutdown request token + runner coordinator"
     note = if ($effectiveMode -eq 'hidden_direct_emergency_fallback') {
       '任务计划程序两种启动链均未通过健康检查，已自动删除失败任务并使用无窗口直接进程继续；本次不会积累计划任务，但系统重启后需再次手动启动。'
     } else {
-      '任务计划程序启动已通过 runner PID 健康检查；无空白 PowerShell 窗口。系统重启后登录自动续跑，正常结束后任务和 bootstrap 自动删除。'
+      '任务计划程序启动已通过 runner PID 健康检查；无空白 PowerShell 窗口。V6.3 由当前 runner 在停止电源保护并删除主任务后直接执行关机协调，不再启动独立 watcher。'
     }
   }
   Write-JsonAtomic $StatusFile $status
@@ -579,12 +579,21 @@ if ($Task -eq "login") {
   Add-QuotedArg $cmd $ShutdownPolicyFile
   $cmd.Add('--shutdown-wait-pid') | Out-Null
   $cmd.Add('$PID') | Out-Null
+  $cmd.Add('--shutdown-coordinator-mode') | Out-Null
+  Add-QuotedArg $cmd 'runner'
   if (-not [string]::IsNullOrWhiteSpace($Config)) {
     $cmd.Add('--config') | Out-Null
     Add-QuotedArg $cmd $Config
   }
   $lines.Add(($cmd -join ' ')) | Out-Null
   $lines.Add('$exitCode = $LASTEXITCODE') | Out-Null
+  $coordinatorScript = Join-Path $RootDir 'scripts\verified_shutdown_coordinator.ps1'
+  $coordinatorStdout = Join-Path $RunDir 'shutdown_coordinator.stdout.log'
+  $coordinatorStderr = Join-Path $RunDir 'shutdown_coordinator.stderr.log'
+  $lines.Add(('if ($exitCode -eq 0 -and (Test-Path -LiteralPath ' + (Quote-PSString $coordinatorScript) + ')) {')) | Out-Null
+  $lines.Add(('  & ' + (Quote-PSString $coordinatorScript) + ' -RunDir ' + (Quote-PSString $RunDir) + ' 1>> ' + (Quote-PSString $coordinatorStdout) + ' 2>> ' + (Quote-PSString $coordinatorStderr))) | Out-Null
+  $lines.Add('  $shutdownCoordinatorExitCode = $LASTEXITCODE') | Out-Null
+  $lines.Add('}') | Out-Null
 } elseif ($Task -eq "monitor") {
   if ([string]::IsNullOrWhiteSpace($Games)) { throw "monitor 需要 -Games。" }
   $cmd = New-Object System.Collections.Generic.List[string]
@@ -648,6 +657,7 @@ $status = [ordered]@{
   shutdown_before = $ShutdownBefore
   shutdown_delay_seconds = $ShutdownDelaySeconds
   shutdown_force_apps = [bool]$EffectiveShutdownAfterComplete
+  shutdown_coordinator_file = (Join-Path $RunDir "shutdown_coordinator_status.json")
   shutdown_watcher_file = (Join-Path $RunDir "conditional_shutdown_watcher_status.json")
   powershell_window_visible = $false
   launch_mode = "hidden_start_process"

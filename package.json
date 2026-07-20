@@ -1,7 +1,7 @@
 {
-  "name": "fb-group-monitor-skill-v6-2-2",
-  "version": "6.2.2",
-  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with V6.2.2 prompt-driven, run-local shutdown policy resolution (default no shutdown), deadline-aware forced shutdown, strong language precedence, transient GeoNames retries, reboot-safe checkpoints, and self-deleting scheduled tasks.",
+  "name": "fb-group-monitor-skill-v6-3-0",
+  "version": "6.3.0",
+  "description": "Reusable Codex skill for two-stage Facebook game group monitoring with V6.3.0 in-runner verified shutdown coordination, prompt-driven run-local shutdown policies, strict finalization checks, reboot-safe checkpoints, and self-deleting scheduled tasks.",
   "private": true,
   "scripts": {
     "login": "powershell -ExecutionPolicy Bypass -File .\\scripts\\open_chrome_9222.ps1",

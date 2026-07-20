@@ -1,4 +1,20 @@
-﻿# FB Game Group Monitor Skill V6.2.2
+# FB Game Group Monitor Skill V6.3.0
+
+
+## V6.3.0：关机改由当前 runner 直接协调
+
+本次实机记录显示，V6.2.2 的独立 PowerShell watcher 虽返回 PID `27420`，但没有生成首个状态文件，也没有 PowerShell 引擎启动记录。Node 仅凭 PID 即把关机标记为已启动，且丢弃了 watcher 标准错误，最终 `shutdown.exe` 从未被调用。
+
+V6.3.0 不再为任务计划程序路径启动独立关机 watcher。第二轮完成后，Node 只写入带随机 token 的“关机待 runner 执行”状态；当前已存活并已完成采集的隐藏 PowerShell runner 在停止电源保护、删除主计划任务后，同步执行 `verified_shutdown_coordinator.ps1`。该协调器重新读取本次 `shutdown_policy.json`，重新核验最终文件、finalized checkpoint/progress、Chrome 关闭状态和 request token，然后直接调用 `System32\shutdown.exe`。
+
+新增完整诊断：
+
+- `shutdown_coordinator_status.json`
+- `shutdown_coordinator.stdout.log`
+- `shutdown_coordinator.stderr.log`
+- `codex_task_complete.json` 中的 `shutdown_coordinator`、`shutdown_request_token` 和实际 `shutdown_result`
+
+默认仍为完成后不关机；Codex 继续根据用户当前文本生成本次运行的 `shutdown_policy.json`。
 
 ## V6.2.2：在 Codex 文本框中指定是否关机
 
@@ -8,7 +24,7 @@
 - “完成后立即关机”；
 - “如果北京时间某日某时前完成，就立即关机”。
 
-Codex 会自动把该文本解析成运行参数，并在本次 `RunDir` 生成 `shutdown_policy.json`。用户不需要打开或修改任何 JSON、PowerShell 或日期配置。该运行文件会被任务计划程序、系统重启续跑和最终关机 watcher 共同读取。
+Codex 会自动把该文本解析成运行参数，并在本次 `RunDir` 生成 `shutdown_policy.json`。用户不需要打开或修改任何 JSON、PowerShell 或日期配置。该运行文件会被任务计划程序、系统重启续跑和最终 runner 关机协调器共同读取。
 
 | 用户意图 | policy mode | 行为 |
 |---|---|---|
@@ -216,7 +232,7 @@ Get-ChildItem .\runs -Recurse -Filter "*geocode*cache*.json" | Remove-Item -Forc
 
 用于 Facebook 游戏群组两阶段监测的 Codex Skill。
 
-本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V6.2.0 支持带 runner 健康检查和自动兜底的任务计划程序后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回任务计划程序名称与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭；Codex 根据当前文本生成运行专属 `shutdown_policy.json`，启用时由隐藏 PowerShell watcher 在锁屏状态下执行严格校验后的强制关机。V5.8.0 同时保留此前对蒙古语误判为俄语的修复。
+本项目按“先登录、再搜索、再详情采集”的流程运行，支持一次任务同时检索多个游戏。V6.2.0 支持带 runner 健康检查和自动兜底的任务计划程序后台启动流程：登录态验证、第一轮抓取和第二轮抓取都可在后台运行，启动命令会立即返回任务计划程序名称与日志路径，避免 Codex 前台命令占用聊天输入框。第二轮默认每 30 分钟刷新进度汇报，最终 Excel 报告生成后自动关闭 Chrome；系统关机默认关闭；Codex 根据当前文本生成运行专属 `shutdown_policy.json`，启用时由当前隐藏 PowerShell runner 在收尾阶段执行严格校验后的强制关机。V5.8.0 同时保留此前对蒙古语误判为俄语的修复。
 
 
 ## GeoNames 外部地理解析兜底
@@ -244,7 +260,7 @@ GeoNames 用户名放在 `config/local/geonames.local.json`，根目录 `.gitign
 - About 仍无结果时，使用泰语、印尼语等高确定性语言映射；只有语言也无法判定时，才调用群名 GeoNames。
 - Excel 输出固定列顺序，`snapshot_date` 和 `group_id` 强制文本格式，活跃指数/规模增速为百分比公式。
 - 第二轮后台启动后会立即返回任务计划程序名称、日志路径和运行目录；默认每 30 分钟输出一次 `codex_progress_report`，并刷新 `codex_progress_report.json`。
-- 可选“完成后关机”：默认不启用。启用后会在最终报表生成并确认 Chrome 已关闭后，启动隐藏 PowerShell 关机 watcher；该监控器等待第二轮进程退出、核验结果文件，再执行 `shutdown.exe /s /f /t <秒数>`。
+- 可选“完成后关机”：默认不启用。启用后会在最终报表生成并确认 Chrome 已关闭后，由当前隐藏 PowerShell runner 调用关机协调器，重新核验结果文件后执行 `shutdown.exe /s /f /t <秒数>`。
 
 ## 变体规则
 
@@ -312,8 +328,8 @@ npm run phase2:bg -- -Index ".\runs\demo\phase1_index.json" -RunDir ".\runs\demo
 - `stdout_log` / `stderr_log`：后台日志。
 - `codex_progress_report.json`：Codex 进度快照。
 - `background_task.json`：本次后台任务元信息。
-- `codex_task_complete.json`：第二轮完成状态；若启用关机，会记录隐藏 PowerShell 关机 watcher信息。
-- `conditional_shutdown_watcher_status.json`：关机监控器状态，包括最终 Excel 校验和强制关机命令是否已发出。
+- `codex_task_complete.json`：第二轮完成状态；若启用关机，会记录 runner 关机协调器、request token 和实际执行结果。
+- `shutdown_coordinator_status.json`：V6.3 主关机协调状态；`conditional_shutdown_watcher_status.json` 仅保留兼容副本。
 
 查看状态：
 
@@ -342,7 +358,7 @@ node .\scripts\phase2_collect_details.js --index ".\runs\demo\phase1_index.json"
 
 设为 `0` 可关闭定时汇报。第二轮最终 Excel 报告生成后默认自动关闭 Chrome；如需保留浏览器，加 `--no-close-chrome true`，或在配置中设置 `"close_chrome_after_report": false`。
 
-自动关机默认关闭。Codex 必须依据当前文本选择 `none / after_complete / before_deadline`，启动脚本自动生成本次运行的 `shutdown_policy.json`。用户无需修改配置文件。启用关机后，第二轮先写入最终报表并确认 Chrome 已关闭，再由隐藏 PowerShell watcher 核验 Excel、finalized checkpoint、completion token 和截止时间，随后执行 `shutdown.exe /s /f /t <秒数>`。若 watcher 启动失败或任一严格校验不通过，电脑保持开机。
+自动关机默认关闭。Codex 必须依据当前文本选择 `none / after_complete / before_deadline`，启动脚本自动生成本次运行的 `shutdown_policy.json`。用户无需修改配置文件。启用关机后，第二轮先写入最终报表并确认 Chrome 已关闭，再由隐藏 PowerShell watcher 核验 Excel、finalized checkpoint、completion token 和截止时间，随后执行 `shutdown.exe /s /f /t <秒数>`。若协调器执行失败或任一严格校验不通过，电脑保持开机，并保留独立 stdout/stderr/status 诊断。
 
 ## 输出文件
 

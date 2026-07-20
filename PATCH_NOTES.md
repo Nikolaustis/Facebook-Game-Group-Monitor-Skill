@@ -1,4 +1,15 @@
-﻿# V6.2.2
+# V6.3.0
+
+- 根据 Ragnarok 六游戏实机记录修复完成后未关机：V6.2.2 detached PowerShell watcher 返回 PID 后即被误判为启动成功，但 watcher 未写首个状态、未留下 stderr，`shutdown.exe` 实际未调用。
+- 任务计划程序路径不再启动独立 watcher；Node 仅写入 `completed_shutdown_pending_runner` 与随机 `shutdown_request_token`。
+- 当前隐藏 scheduled runner 在 Node 返回后停止电源保护、删除主计划任务，再同步调用 `verified_shutdown_coordinator.ps1`。
+- `phase2:direct-bg` 生成的隐藏 wrapper 同样调用 runner coordinator。
+- 协调器重新核验最终文件、finalized checkpoint/progress、completion、Chrome 关闭、策略、截止时间与 request token。
+- 新增 `shutdown_coordinator_status.json`、stdout、stderr；不再丢弃启动与执行错误。
+- 强制关机仍采用完整路径直接调用、隐藏 Start-Process、自删除一次性计划任务三级方式。
+- 默认不关机和 Codex 文本指令生成本次 `shutdown_policy.json` 的规则保持不变。
+
+# V6.2.2
 
 - 默认完成后不关机；不再依赖 task_config 中固定日期或历史关机字段。
 - 新增 `-ShutdownMode none|after_complete|before_deadline`、`-ShutdownDeadline` 和 `-ShutdownInstruction`。

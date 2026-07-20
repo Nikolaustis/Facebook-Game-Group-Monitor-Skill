@@ -1,4 +1,4 @@
-﻿param(
+param(
   [Parameter(Mandatory = $true)][string]$Manifest,
   [Parameter(Mandatory = $true)][string]$TaskName
 )
@@ -23,6 +23,14 @@ function Test-Cdp([string]$Cdp) {
   }
 }
 
+function Add-RunnerStatusFields([string]$Path, [hashtable]$Fields) {
+  try {
+    $payload = if (Test-Path -LiteralPath $Path) { Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json } else { [pscustomobject]@{} }
+    foreach ($key in $Fields.Keys) { $payload | Add-Member -NotePropertyName $key -NotePropertyValue $Fields[$key] -Force }
+    $payload | Add-Member -NotePropertyName updated_at -NotePropertyValue (Get-Date).ToString('o') -Force
+    Write-JsonAtomic $Path $payload
+  } catch {}
+}
 
 function ConvertTo-NativeQuotedArgument([string]$Value) {
   if ($null -eq $Value) { return '""' }
@@ -142,6 +150,11 @@ $lockAcquired = $false
 $guardProcess = $null
 $exitCode = 1
 $normalRunnerExit = $false
+$nodePhase2Executed = $false
+$shutdownCoordinatorExitCode = $null
+$ShutdownCoordinatorScript = Join-Path $RootDir 'scripts\verified_shutdown_coordinator.ps1'
+$ShutdownCoordinatorStdout = Join-Path $RunDir 'shutdown_coordinator.stdout.log'
+$ShutdownCoordinatorStderr = Join-Path $RunDir 'shutdown_coordinator.stderr.log'
 
 try {
   $lockAcquired = $mutex.WaitOne(0)
@@ -246,6 +259,7 @@ try {
   if ($runFreshStart) { $nodeArgs.Add('--fresh-start') | Out-Null; $nodeArgs.Add('true') | Out-Null }
   $nodeArgs.Add('--shutdown-wait-pid') | Out-Null; $nodeArgs.Add([string]$PID) | Out-Null
   $nodeArgs.Add('--scheduled-task-name') | Out-Null; $nodeArgs.Add([string]$TaskName) | Out-Null
+  $nodeArgs.Add('--shutdown-coordinator-mode') | Out-Null; $nodeArgs.Add('runner') | Out-Null
   if (-not [string]::IsNullOrWhiteSpace([string]$m.shutdown_policy_file)) {
     $nodeArgs.Add('--shutdown-policy-file') | Out-Null; $nodeArgs.Add([string]$m.shutdown_policy_file) | Out-Null
   } elseif ([bool]$m.shutdown_after_complete -or -not [string]::IsNullOrWhiteSpace([string]$m.shutdown_before)) {
@@ -272,6 +286,7 @@ try {
     powershell_window_visible = $false
   })
 
+  $nodePhase2Executed = $true
   & node @nodeArgs 1>> $StdoutLog 2>> $StderrLog
   $exitCode = $LASTEXITCODE
   $normalRunnerExit = $true
@@ -327,6 +342,31 @@ finally {
     $deletedNow = Remove-OwnScheduledTaskNow -Name $TaskName -ManifestPath $Manifest -StatusPath $RunnerStatus -BootstrapPath $BootstrapPath
     if (-not $deletedNow) {
       Start-DeferredTaskCleanup -Name $TaskName -ManifestPath $Manifest -StatusPath $RunnerStatus -BootstrapPath $BootstrapPath
+    }
+
+    # V6.3: the already-running hidden PowerShell runner is the shutdown coordinator.
+    # This avoids spawning a detached watcher that can receive a PID but die before its first log/status write.
+    if ($nodePhase2Executed -and $exitCode -eq 0 -and (Test-Path -LiteralPath $ShutdownCoordinatorScript)) {
+      try {
+        & $ShutdownCoordinatorScript -RunDir $RunDir -ScheduledTaskName $TaskName -RunnerStatusFile $RunnerStatus 1>> $ShutdownCoordinatorStdout 2>> $ShutdownCoordinatorStderr
+        $shutdownCoordinatorExitCode = $LASTEXITCODE
+        Add-RunnerStatusFields $RunnerStatus @{
+          shutdown_coordinator = 'runner_in_process'
+          shutdown_coordinator_exit_code = $shutdownCoordinatorExitCode
+          shutdown_coordinator_stdout = $ShutdownCoordinatorStdout
+          shutdown_coordinator_stderr = $ShutdownCoordinatorStderr
+          shutdown_coordinator_status = (Join-Path $RunDir 'shutdown_coordinator_status.json')
+        }
+      } catch {
+        $shutdownCoordinatorExitCode = 1
+        Add-Content -LiteralPath $ShutdownCoordinatorStderr -Value "[shutdown-coordinator] fatal_at=$((Get-Date).ToString('o'))`n$($_.Exception.ToString())"
+        Add-RunnerStatusFields $RunnerStatus @{
+          shutdown_coordinator = 'runner_in_process'
+          shutdown_coordinator_exit_code = 1
+          shutdown_coordinator_error = $_.Exception.ToString()
+          shutdown_coordinator_status = (Join-Path $RunDir 'shutdown_coordinator_status.json')
+        }
+      }
     }
   }
 }

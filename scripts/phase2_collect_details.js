@@ -3602,6 +3602,10 @@ function resolveCollisions(rows) {
   };
   const shutdownWaitPid = Math.max(1, Math.floor(Number(args['shutdown-wait-pid'] || process.ppid || process.pid)));
   const scheduledTaskName = clean(args['scheduled-task-name'] || '');
+  const shutdownCoordinatorMode = clean(args['shutdown-coordinator-mode'] || config.shutdown_coordinator_mode || 'watcher').toLowerCase();
+  if (!['watcher', 'runner'].includes(shutdownCoordinatorMode)) {
+    throw new Error(`Unsupported shutdown coordinator mode: ${shutdownCoordinatorMode}`);
+  }
   const threshold = Number(args.threshold || config.threshold || 10);
   const candidateTimeoutMs = Math.max(1000, Number(args['candidate-timeout-ms'] || config.candidate_timeout_ms || 60000));
   const namePrefilterConfig = config.phase2_name_prefilter && typeof config.phase2_name_prefilter === 'object'
@@ -4489,6 +4493,20 @@ function resolveCollisions(rows) {
             requested: false,
             reason: 'shutdown_skipped_because_chrome_close_was_not_confirmed',
           };
+        } else if (shutdownCoordinatorMode === 'runner') {
+          const requestToken = `fbm-runner-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          shutdownResult = {
+            ok: true,
+            requested: true,
+            reason: 'shutdown_delegated_to_runner',
+            coordinator_mode: 'runner',
+            coordinator_status_file: path.join(path.dirname(outCompletion), 'shutdown_coordinator_status.json'),
+            compatibility_status_file: path.join(path.dirname(outCompletion), 'conditional_shutdown_watcher_status.json'),
+            shutdown_request_token: requestToken,
+            shutdown_before: normalizedShutdownBefore,
+            delay_seconds: shutdownDelaySeconds,
+            force_apps: true,
+          };
         } else {
           shutdownResult = startConditionalShutdownWatcher({
             watchPid: shutdownWaitPid,
@@ -4505,14 +4523,15 @@ function resolveCollisions(rows) {
             shutdownBefore: normalizedShutdownBefore,
             scheduledTaskName,
           });
-          // V6.0 intentionally has no direct shutdown fallback. If the validated watcher
-          // cannot start, the machine remains on rather than risking shutdown after a partial run.
+          // Compatibility path for direct invocations that do not use the V6.3 runner coordinator.
         }
         writeCompletionStatus(outCompletion, buildCompletionPayload(completionBase, {
           status: shutdownResult.ok
-            ? (['conditional_forced_shutdown_watcher_started', 'conditional_forced_shutdown_powershell_watcher_started'].includes(shutdownResult.reason)
-              ? 'completed_shutdown_watcher_started'
-              : 'completed_forced_shutdown_scheduled')
+            ? (shutdownResult.reason === 'shutdown_delegated_to_runner'
+              ? 'completed_shutdown_pending_runner'
+              : (['conditional_forced_shutdown_watcher_started', 'conditional_forced_shutdown_powershell_watcher_started'].includes(shutdownResult.reason)
+                ? 'completed_shutdown_watcher_started'
+                : 'completed_forced_shutdown_scheduled'))
             : 'completed_shutdown_not_scheduled',
           final_report_generated: true,
           phase2_finalization_verified: true,
@@ -4527,8 +4546,11 @@ function resolveCollisions(rows) {
           shutdown_wait_pid: shutdownWaitPid,
           scheduled_task_name: scheduledTaskName,
           shutdown_result: shutdownResult,
+          shutdown_coordinator_mode: shutdownResult.coordinator_mode || shutdownCoordinatorMode,
+          shutdown_coordinator_status_file: shutdownResult.coordinator_status_file || '',
+          shutdown_request_token: shutdownResult.shutdown_request_token || '',
           shutdown_watcher_pid: shutdownResult.watcher_pid || null,
-          shutdown_watcher_status_file: shutdownResult.watcher_status_file || '',
+          shutdown_watcher_status_file: shutdownResult.watcher_status_file || shutdownResult.compatibility_status_file || '',
           shutdown_watcher_token: shutdownResult.watcher_token || '',
           shutdown_force_apps: true,
           completed_at: new Date().toISOString(),
