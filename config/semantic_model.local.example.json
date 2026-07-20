@@ -1,0 +1,98 @@
+{
+  "semantic_region_resolver": {
+    "enabled": "auto",
+    "provider_order": [
+      "custom_api",
+      "codex_exec",
+      "rules_only"
+    ],
+    "codex_exec": {
+      "enabled": "auto",
+      "command": "codex",
+      "model": "",
+      "reasoning_effort": "low",
+      "profile": "",
+      "sandbox": "read-only",
+      "skip_git_repo_check": true,
+      "timeout_ms": 90000,
+      "preflight_timeout_ms": 12000,
+      "schema_file": "assets/semantic_region_output.schema.json",
+      "probe_version": true,
+      "require_login_status": true,
+      "diagnostic_file": "",
+      "comment": "Use a standalone Codex CLI or set CODEX_CLI_PATH. WindowsApps desktop aliases are rejected."
+    },
+    "api_providers": [
+      {
+        "name": "deepseek_primary",
+        "enabled": false,
+        "protocol": "openai_chat_completions",
+        "endpoint": "https://api.deepseek.com/chat/completions",
+        "model": "YOUR_DEEPSEEK_MODEL",
+        "api_key": "",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "auth": {
+          "type": "header",
+          "header": "Authorization",
+          "scheme": "Bearer",
+          "query_param": "key"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "query": {},
+        "timeout_ms": 90000,
+        "retry_count": 1,
+        "retry_backoff_ms": 1200,
+        "rate_limit_ms": 250,
+        "max_output_tokens": 500,
+        "response_text_path": "choices.0.message.content",
+        "response_json_path": "",
+        "request_body_template": null,
+        "structured_output_mode": "json_object",
+        "thinking": {
+          "type": "disabled"
+        },
+        "extra_body": null,
+        "comment": "V6.5.4 always includes the word JSON and the full output schema in the prompt. The thinking object is forwarded to the request body."
+      },
+      {
+        "name": "other_openai_compatible_api",
+        "enabled": false,
+        "protocol": "openai_chat_completions",
+        "endpoint": "",
+        "model": "",
+        "api_key": "",
+        "api_key_env": "SEMANTIC_MODEL_API_KEY",
+        "auth": {
+          "type": "header",
+          "header": "Authorization",
+          "scheme": "Bearer",
+          "query_param": "key"
+        },
+        "headers": {},
+        "query": {},
+        "timeout_ms": 30000,
+        "retry_count": 1,
+        "retry_backoff_ms": 1200,
+        "rate_limit_ms": 250,
+        "max_output_tokens": 500,
+        "response_text_path": "choices.0.message.content",
+        "response_json_path": "",
+        "request_body_template": null,
+        "structured_output_mode": "json_schema",
+        "thinking": null,
+        "extra_body": null
+      }
+    ],
+    "trigger_mode": "risk_only",
+    "confidence_threshold": 0.85,
+    "max_calls_per_run": 500,
+    "fallback_on_low_confidence": true,
+    "fallback_on_low_confidence_comment": "V6.5.4 enforces true at runtime so low-confidence API output continues to Codex.",
+    "allow_model_explicit_region_lock": true,
+    "fail_closed_on_low_confidence": true,
+    "fail_closed_on_error": true,
+    "cache_file": "runs/semantic_region_cache.json"
+  }
+}
