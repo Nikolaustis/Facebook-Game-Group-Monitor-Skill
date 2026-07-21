@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
+const { readJsonFile } = require('./json_io');
 
 function parseArgs(argv) {
   const out = {};
@@ -273,7 +274,7 @@ let checkpoint = null;
 let collisionReport = [];
 let droppedCollision = 0;
 if (fs.existsSync(checkpointSrc)) {
-  checkpoint = JSON.parse(fs.readFileSync(checkpointSrc, 'utf8'));
+  checkpoint = readJsonFile(checkpointSrc);
   rawRows = Array.isArray(checkpoint.staged_rows) ? checkpoint.staged_rows : [];
   if (rawRows.length) {
     sourceKind = 'phase2_autosave_state';

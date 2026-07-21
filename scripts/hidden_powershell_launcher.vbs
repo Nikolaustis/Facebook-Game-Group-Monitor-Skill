@@ -1,13 +1,12 @@
 Option Explicit
 
-' V6.2.0: resilient windowless launcher for Task Scheduler.
+' Resilient windowless launcher for Task Scheduler.
 ' Usage:
 '   wscript.exe //B //Nologo hidden_powershell_launcher.vbs <bootstrap.ps1> <trace.log> <task-name>
 '
 ' The launcher first uses WMI Win32_Process.Create with ShowWindow=0. If WMI process
 ' creation is unavailable, it falls back to WScript.Shell.Run with window style 0.
-' Only a generated bootstrap script path is forwarded, which avoids the multi-layer
-' argument quoting failure seen in V6.1.0.
+' Only a generated bootstrap script path is forwarded to avoid multi-layer argument quoting failures.
 
 Dim shell, fso, bootstrapPath, tracePath, taskName, psExe, commandLine
 Dim wmi, startup, processClass, createResult, childPid, usedFallback, exitCode

@@ -5,11 +5,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Write-Utf8NoBom([string]$Path, [string]$Text) {
+  $dir = Split-Path -Parent $Path
+  if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+  [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function Write-JsonAtomic([string]$Path, $Payload) {
   $dir = Split-Path -Parent $Path
   if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
   $tmp = "$Path.tmp-$PID-$(Get-Date -Format 'yyyyMMddHHmmssfff')"
-  $Payload | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $tmp -Encoding UTF8
+  Write-Utf8NoBom $tmp ($Payload | ConvertTo-Json -Depth 10)
   Move-Item -Force -LiteralPath $tmp -Destination $Path
 }
 
@@ -95,7 +101,7 @@ function Remove-OwnScheduledTaskNow([string]$Name, [string]$ManifestPath, [strin
     $status = Get-Content -Raw -LiteralPath $StatusPath | ConvertFrom-Json
     $status | Add-Member -NotePropertyName scheduled_task_deleted -NotePropertyValue $deleted -Force
     $status | Add-Member -NotePropertyName scheduled_task_deleted_at -NotePropertyValue (Get-Date).ToString('o') -Force
-    $status | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $StatusPath -Encoding UTF8
+    Write-Utf8NoBom $StatusPath ($status | ConvertTo-Json -Depth 10)
   } catch {}
   if ($deleted) {
     Remove-Item -Force -LiteralPath $ManifestPath -ErrorAction SilentlyContinue
@@ -120,7 +126,7 @@ try {
   `$status = Get-Content -Raw -LiteralPath '$escapedStatus' | ConvertFrom-Json
   `$status | Add-Member -NotePropertyName scheduled_task_deleted -NotePropertyValue `$deleted -Force
   `$status | Add-Member -NotePropertyName scheduled_task_deleted_at -NotePropertyValue (Get-Date).ToString('o') -Force
-  `$status | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath '$escapedStatus' -Encoding UTF8
+  [System.IO.File]::WriteAllText('$escapedStatus', (`$status | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding(`$false)))
 } catch {}
 if (`$deleted) {
   Remove-Item -Force -LiteralPath '$escapedManifest' -ErrorAction SilentlyContinue
@@ -128,7 +134,7 @@ if (`$deleted) {
 }
 "@
   $cleanupScript = Join-Path (Split-Path -Parent $StatusPath) ("scheduled_task_cleanup_{0}.ps1" -f ([Guid]::NewGuid().ToString('N')))
-  Set-Content -LiteralPath $cleanupScript -Value ($command + "`nRemove-Item -Force -LiteralPath '" + $cleanupScript.Replace("'", "''") + "' -ErrorAction SilentlyContinue") -Encoding UTF8
+  Write-Utf8NoBom $cleanupScript ($command + "`nRemove-Item -Force -LiteralPath '" + $cleanupScript.Replace("'", "''") + "' -ErrorAction SilentlyContinue")
   [void](Start-HiddenPowerShellProcess -ScriptPath $cleanupScript)
 }
 
@@ -214,6 +220,14 @@ try {
     powershell_window_visible = $false
   })
 
+  $inputValidation = if ([string]::IsNullOrWhiteSpace([string]$m.input_validation_report)) { Join-Path $RunDir 'phase2_input_validation.json' } else { [string]$m.input_validation_report }
+  $validationArgs = @((Join-Path $RootDir 'scripts\validate_phase2_inputs.js'),'--index',[string]$m.index,'--out-report',$inputValidation)
+  if (-not [string]::IsNullOrWhiteSpace([string]$m.config)) { $validationArgs += @('--config',[string]$m.config) }
+  if (-not [string]::IsNullOrWhiteSpace([string]$m.shutdown_policy_file)) { $validationArgs += @('--shutdown-policy-file',[string]$m.shutdown_policy_file) }
+  & node @validationArgs 1>> $StdoutLog 2>> $StderrLog
+  if ($LASTEXITCODE -ne 0) { throw "Phase 2 input validation failed. See: $inputValidation" }
+  Add-RunnerStatusFields $RunnerStatus @{ input_validation_ok = $true; input_validation_report = $inputValidation }
+
   # Start the power guard before opening Chrome or waiting for CDP. The whole scheduled
   # execution, including browser startup, is protected against sleep and cancellable shutdowns.
   if ([bool]$m.enable_power_guard) {
@@ -275,24 +289,40 @@ try {
   }
 
   Write-JsonAtomic $RunnerStatus ([ordered]@{
-    status = 'phase2_running'
+    status = 'phase2_launching'
     task_name = $TaskName
     runner_pid = $PID
     power_guard_pid = if ($guardProcess) { $guardProcess.Id } else { $null }
     run_dir = $RunDir
     started_at = (Get-Date).ToString('o')
+    startup_verified = $false
     scheduled_task_deleted = $false
     launcher = $LauncherMode
     powershell_window_visible = $false
   })
 
+  $supervisorArgs = New-Object System.Collections.Generic.List[string]
+  $supervisorArgs.Add((Join-Path $RootDir 'scripts\phase2_supervisor.js')) | Out-Null
+  foreach ($pair in @(
+    @('--runner-status', $RunnerStatus),
+    @('--progress-file', (Join-Path $RunDir 'phase2_progress.json')),
+    @('--stdout-log', $StdoutLog),
+    @('--stderr-log', $StderrLog),
+    @('--startup-timeout-seconds', [string]([Math]::Max(30, [int]$m.phase2_health_timeout_seconds)))
+  )) {
+    $supervisorArgs.Add([string]$pair[0]) | Out-Null
+    $supervisorArgs.Add([string]$pair[1]) | Out-Null
+  }
+  $supervisorArgs.Add('--') | Out-Null
+  foreach ($item in $nodeArgs) { $supervisorArgs.Add([string]$item) | Out-Null }
+
   $nodePhase2Executed = $true
-  & node @nodeArgs 1>> $StdoutLog 2>> $StderrLog
+  & node @supervisorArgs 1>> $StdoutLog 2>> $StderrLog
   $exitCode = $LASTEXITCODE
   $normalRunnerExit = $true
   Add-Content -LiteralPath $StdoutLog -Value "[scheduled] finished_at=$((Get-Date).ToString('o')) exit_code=$exitCode"
 
-  Write-JsonAtomic $RunnerStatus ([ordered]@{
+  Add-RunnerStatusFields $RunnerStatus @{
     status = if ($exitCode -eq 0) { 'finished_success' } else { 'finished_error' }
     task_name = $TaskName
     runner_pid = $PID
@@ -302,7 +332,7 @@ try {
     shutdown_policy_file = [string]$m.shutdown_policy_file
     finished_at = (Get-Date).ToString('o')
     scheduled_task_deleted = $false
-  })
+  }
 }
 catch {
   $normalRunnerExit = $true
@@ -325,7 +355,7 @@ catch {
 finally {
   if ($guardProcess -and -not $guardProcess.HasExited) {
     $guardStopFile = Join-Path $RunDir 'runtime_power_guard.stop'
-    try { Set-Content -LiteralPath $guardStopFile -Value ((Get-Date).ToString('o')) -Encoding UTF8 } catch {}
+    try { Write-Utf8NoBom $guardStopFile ((Get-Date).ToString('o')) } catch {}
     try { Wait-Process -Id $guardProcess.Id -Timeout 12 -ErrorAction SilentlyContinue } catch {}
     if (Get-Process -Id $guardProcess.Id -ErrorAction SilentlyContinue) {
       Stop-Process -Id $guardProcess.Id -Force -ErrorAction SilentlyContinue

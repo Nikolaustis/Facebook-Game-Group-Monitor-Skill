@@ -6,6 +6,7 @@ const { execFile, spawn } = require('child_process');
 const http = require('http');
 const https = require('https');
 const { createCodexProgressReporter, parseProgressReportEveryMinutes } = require('./progress_reporter');
+const { readJsonFile } = require('./json_io');
 const {
   SemanticRegionCache,
   mergeSemanticRegionResolverConfig,
@@ -59,7 +60,7 @@ function clean(s) {
 function readJsonSafe(file) {
   try {
     if (!file || !fs.existsSync(file)) return null;
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    return readJsonFile(file);
   } catch (err) {
     console.warn(`[phase2] ignored unreadable JSON ${file}: ${err && err.message ? err.message : err}`);
     return null;
@@ -243,7 +244,7 @@ function loadShutdownPolicy(policyFile) {
   }
   let payload;
   try {
-    payload = JSON.parse(fs.readFileSync(resolvedFile, 'utf8').replace(/^\uFEFF/, ''));
+    payload = readJsonFile(resolvedFile);
   } catch (err) {
     throw new Error(`Invalid shutdown policy JSON: ${resolvedFile}: ${err && err.message ? err.message : String(err)}`);
   }
@@ -1351,7 +1352,7 @@ function detectRegionByAboutLocation(locationText, countryRegionKeywords, direct
 
 function readJsonIfExists(file) {
   try {
-    if (file && fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (file && fs.existsSync(file)) return readJsonFile(file);
   } catch (_err) {
     return null;
   }
@@ -2144,7 +2145,7 @@ async function geocodeQuery(query, source, externalGeocoder, cache, stats) {
   const endpointKey = normalizeGeonamesEndpoint(externalGeocoder.endpoint);
   // V6.5 cache namespace separates semantic-authorized lookups from legacy cached decisions and keeps the
   // stricter group-name evaluation separate from explicit About > Location lookups.
-  const cacheKey = `geonames-v6.5|${endpointKey}|${source}|${normalizedQuery}`;
+  const cacheKey = `geonames-v6.6|${endpointKey}|${source}|${normalizedQuery}`;
   const cached = cache ? cache.get(cacheKey) : null;
   if (cached) {
     if (stats) stats.external_geocoder_cache_hits = (stats.external_geocoder_cache_hits || 0) + 1;
@@ -3805,7 +3806,7 @@ function resolveCollisions(rows) {
   const outDebugRows = path.resolve(args['out-debug-rows'] || path.join(path.dirname(indexFile), 'debug_rows.json'));
   const snapshotDate = clean(args['snapshot-date'] || '');
   const configFile = args.config ? path.resolve(args.config) : '';
-  const config = configFile && fs.existsSync(configFile) ? JSON.parse(fs.readFileSync(configFile, 'utf8')) : {};
+  const config = configFile && fs.existsSync(configFile) ? readJsonFile(configFile) : {};
   const checkpointEvery = Math.max(1, Number(args['checkpoint-every'] || config.checkpoint_every || 1));
   const checkpointEveryCandidate = Math.max(1, Number(args['checkpoint-every-candidate'] || args['checkpoint-every-candidates'] || config.checkpoint_every_candidate || config.checkpoint_every_candidates || 1));
   const outPartialXlsx = path.resolve(args['out-partial-xlsx'] || path.join(path.dirname(indexFile), 'partial_verified_rows.xlsx'));
@@ -3885,7 +3886,7 @@ function resolveCollisions(rows) {
   const semanticRegionResolver = mergeSemanticRegionResolverConfig(config, configFile, path.dirname(outXlsx));
   const semanticRegionCache = new SemanticRegionCache(semanticRegionResolver.cache_file);
 
-  const index = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
+  const index = readJsonFile(indexFile);
   const gameEntries = Array.isArray(index.games) ? index.games : [];
   if (!gameEntries.length) {
     console.error('phase1_index.json does not contain any game entries.');
@@ -4025,6 +4026,34 @@ function resolveCollisions(rows) {
       growthRate: '规模增速=上周新增/(社群规模-上周新增）',
     };
 
+    const geocoderAuditFieldNames = [
+      '__geocoder_provider',
+      '__geocoder_status',
+      '__geocoder_source',
+      '__geocoder_query',
+      '__geocoder_attempted_queries',
+      '__geocoder_endpoint',
+      '__geocoder_error_reason',
+      '__geocoder_country_code',
+      '__geocoder_place_name',
+      '__geocoder_admin1',
+      '__geocoder_confidence',
+    ];
+    const semanticAuditFieldNames = [
+      '__semantic_provider',
+      '__semantic_model',
+      '__semantic_status',
+      '__semantic_trigger',
+      '__semantic_location_intent',
+      '__semantic_scope',
+      '__semantic_confidence',
+      '__semantic_candidate_places',
+      '__semantic_explicit_regions',
+      '__semantic_reason',
+      '__semantic_cached',
+      '__semantic_provider_chain',
+      '__semantic_fallback_reason',
+    ];
     const fields = [
       'snapshot_date',
       'region',
@@ -4046,31 +4075,13 @@ function resolveCollisions(rows) {
       '__region_source',
       '__region_keyword_hits',
       '__region_location',
-      '__semantic_provider',
-      '__semantic_model',
-      '__semantic_status',
-      '__semantic_trigger',
-      '__semantic_location_intent',
-      '__semantic_scope',
-      '__semantic_confidence',
-      '__semantic_candidate_places',
-      '__semantic_explicit_regions',
-      '__semantic_reason',
-      '__semantic_cached',
-      '__semantic_provider_chain',
-      '__semantic_fallback_reason',
-      '__geocoder_provider',
-      '__geocoder_status',
-      '__geocoder_source',
-      '__geocoder_query',
-      '__geocoder_attempted_queries',
-      '__geocoder_endpoint',
-      '__geocoder_error_reason',
-      '__geocoder_country_code',
-      '__geocoder_place_name',
-      '__geocoder_admin1',
-      '__geocoder_confidence',
+      ...geocoderAuditFieldNames,
+      ...semanticAuditFieldNames,
     ];
+    const expectedAuditFields = [...geocoderAuditFieldNames, ...semanticAuditFieldNames];
+    if (fields.slice(20).join('|') !== expectedAuditFields.join('|')) {
+      throw new Error('XLSX audit column contract violated: GeoNames must occupy U:AE and semantic API/Codex fields must start at AF.');
+    }
     const manualReviewExtraFields = [
       'language_signal',
       'about_location',
@@ -4305,7 +4316,10 @@ function resolveCollisions(rows) {
         ...globalGameEntityMaskPhrases,
         ...languageTitlePhrases,
       ]);
-      const candidates = JSON.parse(fs.readFileSync(g.candidates_file, 'utf8'));
+      const candidatesFile = path.isAbsolute(clean(g.candidates_file))
+        ? path.normalize(clean(g.candidates_file))
+        : path.resolve(path.dirname(indexFile), clean(g.candidates_file));
+      const candidates = readJsonFile(candidatesFile);
       currentCandidateTotal = candidates.length;
       const resumeCurrentGame = resumeProgress && currentGameIndex === Number(resumeProgress.current_game_index || -1);
       const resumeStartIndex = resumeCurrentGame
@@ -4656,7 +4670,7 @@ function resolveCollisions(rows) {
     writeJsonAtomic(outAudit, stats);
     writeJsonAtomic(outDebugRows, debugRows);
 
-    const finalCheckpoint = fs.existsSync(outCheckpoint) ? JSON.parse(fs.readFileSync(outCheckpoint, 'utf8')) : {};
+    const finalCheckpoint = fs.existsSync(outCheckpoint) ? readJsonFile(outCheckpoint) : {};
     finalCheckpoint.checkpoint_version = 4;
     finalCheckpoint.finalized = true;
     finalCheckpoint.finalized_at = new Date().toISOString();

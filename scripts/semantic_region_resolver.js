@@ -4,6 +4,7 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
+const { readJsonFile } = require('./json_io');
 
 function scalarText(value) {
   if (value === null || value === undefined) return '';
@@ -44,7 +45,7 @@ function numberInRange(raw, defaultValue, min, max) {
 function readJsonIfExists(file) {
   try {
     if (!file || !fs.existsSync(file)) return null;
-    return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    return readJsonFile(file);
   } catch (_err) {
     return null;
   }
@@ -337,7 +338,7 @@ function buildCandidateLaunch(candidate, args) {
 }
 
 function normalizeProviderOrder(_raw) {
-  // V6.5.4 uses one fixed policy. Legacy task files cannot restore Codex-first
+  // V6.6.0 uses one fixed policy. Legacy task files cannot restore Codex-first
   // ordering or omit the API stage. Availability is controlled by each provider's
   // enabled/configured state, not by changing the chain.
   return ['custom_api', 'codex_exec', 'rules_only'];
@@ -495,11 +496,11 @@ function mergeSemanticRegionResolverConfig(config, configFile, outDir) {
   merged.fail_closed_on_low_confidence = boolLike(merged.fail_closed_on_low_confidence, true);
   merged.fail_closed_on_error = boolLike(merged.fail_closed_on_error, true);
   merged.allow_model_explicit_region_lock = boolLike(merged.allow_model_explicit_region_lock, true);
-  // V6.5.4 fixed policy: any low-confidence API result must continue to the
+  // V6.6.0 fixed policy: any low-confidence API result must continue to the
   // next provider and ultimately Codex. Legacy/private local files that still
   // contain false are intentionally overridden at runtime.
   merged.fallback_on_low_confidence = true;
-  merged.fallback_on_low_confidence_source = 'v6.5.4_forced_api_to_codex_fallback';
+  merged.fallback_on_low_confidence_source = 'v6.6.0_forced_api_to_codex_fallback';
   merged.cache_file = resolveConfigPathMaybe(
     merged.cache_file || path.join(outDir || process.cwd(), 'semantic_region_cache.json'),
     baseDir,
@@ -958,7 +959,7 @@ function persistCodexDiagnostic(config, payload) {
     if (!config?.diagnostic_file) return;
     writeJsonAtomic(config.diagnostic_file, {
       diagnostic_kind: 'facebook_group_monitor_codex_exec',
-      version: '6.5.4',
+      version: '6.6.0',
       updated_at: new Date().toISOString(),
       requested_command: config.command,
       candidates: (config.candidates || []).map(safeCodexCandidateForDiagnostic),
@@ -1246,7 +1247,7 @@ function providerFingerprint(config) {
 
 function cacheKey(config, context) {
   const value = JSON.stringify({
-    v: 'semantic-region-v6.5.4-api-first-deepseek-compatible',
+    v: 'semantic-region-v6.6.0-api-first-deepseek-compatible',
     providers: providerFingerprint(config),
     group_name: clean(context.groupName),
     residual_group_name: clean(context.residualGroupName),
@@ -1255,7 +1256,7 @@ function cacheKey(config, context) {
     risk_terms: context.riskTerms || [],
     safe_queries: context.safeQueries || [],
   });
-  return `semantic-region-v6.5.4-api-first-deepseek-compatible|${crypto.createHash('sha256').update(value).digest('hex')}`;
+  return `semantic-region-v6.6.0-api-first-deepseek-compatible|${crypto.createHash('sha256').update(value).digest('hex')}`;
 }
 
 function recordDecisionStats(out, stats) {

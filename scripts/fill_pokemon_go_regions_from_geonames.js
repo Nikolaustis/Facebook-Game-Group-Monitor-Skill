@@ -3,6 +3,7 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const XLSX = require('xlsx');
+const { readJsonFile } = require('./json_io');
 
 const runDir = path.resolve('runs/pokemon_go_phase2_20260709_000000');
 const inputXlsx = path.join(runDir, 'fb_monitoring_filtered.xlsx');
@@ -235,7 +236,7 @@ function readUsername() {
   const localPath = path.resolve('config/local/geonames.local.json');
   let username = process.env.GEONAMES_USERNAME || '';
   if (fs.existsSync(localPath)) {
-    const raw = JSON.parse(fs.readFileSync(localPath, 'utf8'));
+    const raw = readJsonFile(localPath);
     const nested = raw.external_geocoder && typeof raw.external_geocoder === 'object' ? raw.external_geocoder : raw;
     username = username || nested.username || '';
   }
@@ -252,7 +253,7 @@ async function main() {
   if (!fs.existsSync(inputXlsx)) throw new Error(`Missing input: ${inputXlsx}`);
   fs.copyFileSync(inputXlsx, backupXlsx);
 
-  const cache = fs.existsSync(cacheFile) ? JSON.parse(fs.readFileSync(cacheFile, 'utf8')) : {};
+  const cache = fs.existsSync(cacheFile) ? readJsonFile(cacheFile) : {};
   const wb = XLSX.readFile(inputXlsx, { cellDates: false, cellFormula: true, cellStyles: true });
   const ws = wb.Sheets.detail;
   const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });

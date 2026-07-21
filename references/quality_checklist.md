@@ -1,132 +1,72 @@
-# 质量检查清单 V5.8.0
+# 质量检查清单
 
-## 运行前
+## 输入与启动
 
-- [ ] 已完成 Facebook 手动登录。
-- [ ] 游戏名列表确认无误，尤其是多游戏批量任务中的相近标题。
-- [ ] 如需启用 `connector_x` 或 seed URL，已在 `title_variant_overrides` 中按游戏单独配置。
-- [ ] 未把某个游戏的特殊变体写成全局规则。
-- [ ] threshold 已确认，默认 `10`。
+- [ ] index、config、shutdown policy 和所有 candidate JSON 已通过 `validate_phase2_inputs.js`。
+- [ ] JSON 编码检测结果可接受，UTF-8 BOM 或 UTF-16 不会导致解析失败。
+- [ ] `scheduled_phase2_runner_status.json` 为 `phase2_running`。
+- [ ] `startup_verified=true`，且存在启动后新写入的 `phase2_progress.json`。
+- [ ] 启动失败时记录了退出码和 stderr tail。
 
-## 第一轮后
+## 第一轮
 
-- [ ] 每个游戏都生成了 `phase1_*_candidates.json`。
-- [ ] 每个游戏都生成了 `phase1_*_stats.json`。
-- [ ] `phase1_index.json` 中每个游戏都有 `search_plan` 和 `query_runs`。
-- [ ] 候选中保留 `source_query`、`query_variant_type`、`source_is_seed_url` 等字段。
-- [ ] 到达深翻停止条件后，已向用户确认“可以停止，继续 / 继续深翻”。
+- [ ] 每个游戏独立搜索。
+- [ ] 未自动扩展为过宽 IP 词根。
+- [ ] source query 与变体类型完整保存。
+- [ ] 深翻停止经过用户确认。
 
-## V5.7.0 群名预筛
+## 第二轮
 
-- [ ] `phase2_name_prefilter_enabled` 默认为 1。
-- [ ] 第一轮群名完整且完全无关的候选记为 `prefilter_dropped_not_relevant`，不会增加 `about_attempted`。
-- [ ] 强标题命中增加 `phase2_name_prefilter_passed_strong`。
-- [ ] IP root / sibling 等弱命中默认增加 `phase2_name_prefilter_passed_manual_review` 并继续采集。
-- [ ] seed URL、缺失或截断群名增加 `phase2_name_prefilter_inconclusive`，不得被预筛丢弃。
-- [ ] `about_avoided_by_name_prefilter` 与预筛跳过数量一致或可解释。
+- [ ] 群名预筛发生在 About/讨论页访问之前。
+- [ ] 明显无关候选被跳过。
+- [ ] seed、缺名、截断群名仍进入页面核验。
+- [ ] 每个候选完成后完整保存 checkpoint。
+- [ ] 断点恢复位置不超过完整 checkpoint。
 
-## 第二轮后
+## 相关性与兄弟游戏
 
-- [ ] 成功生成 `fb_monitoring_filtered.xlsx`。
-- [ ] `fb_monitoring_filtered.xlsx` 包含 `detail` sheet。
-- [ ] `fb_monitoring_filtered.xlsx` 包含 `manual_review` sheet。
-- [ ] 成功生成 `fb_monitoring_filtered_summary.json`、`collision_report.json`、`audit_stats.json`、`debug_rows.json`。
-- [ ] 未生成或依赖 CSV 输出文件。
-- [ ] `collision_report.json` 没有异常大量并列冲突。
-- [ ] `audit_stats.json` 中 `dropped_collision`、`dropped_lang_region` 没有异常偏高。
-
-## Excel 格式
-
-- [ ] `snapshot_date` 为文本日期，不是 Excel 序列号。
-- [ ] `group_id` 为文本，不是科学计数法。
-- [ ] `活跃指数=当日新帖/社群规模` 为公式列，百分比格式，2 位小数。
-- [ ] `规模增速=上周新增/(社群规模-上周新增）` 为公式列，百分比格式，2 位小数。
-- [ ] 非 ASCII 群名正常显示，例如泰语、越南语、老挝语、日文、韩文等不乱码。
+- [ ] 完整标题、紧凑标题和受控变体分别审计。
+- [ ] 兄弟标题排斥优先于弱命中。
+- [ ] IP root-only 和 full-text-only 未混入 `detail`。
+- [ ] 同一 URL 的跨游戏归属完成竞争裁决。
 
 ## 语言与地区
 
-- [ ] 语言优先级符合规则：讨论区前五条玩家发言优先，群名辅助，about 仅在存在用户手写非 UI 内容时低优先级兜底。
-- [ ] 非公开小组、about 无手写描述、讨论区无正文/极短正文时，不得把 Facebook 中文结构文案、按钮、时间、互动统计、评论入口识别成 `Chinese`。
-- [ ] 拉丁语系群组不应因为英文游戏词被误判为 `English`。
-- [ ] 地区优先来自群组名称中的明确国家/地区/属地/大区语义。
-- [ ] `region` 已按业务规则归并：Middle East、Central Asia、South Asia、North America、LATAM、Africa、EUR、Oceania 等不再拆成过多国家。
-- [ ] 东亚与东南亚单一国家/地区仍按自身输出；同一业务大区内多国家/地区同时命中时，输出对应大区，例如 `MY + SG` -> `SEA`、`HK + TW` -> `EA`。
-- [ ] Brazil 单独输出 `BR`；Turkey、Netherlands、Germany、France、Italy、Poland、Russia 单一命中时分别输出 `TR`、`NL`、`DE`、`FR`、`IT`、`PL`、`RU`；多个欧洲命中同属欧洲业务大区时可折叠为 `EUR`。
-- [ ] 明确非洲国家优先输出 `Africa`；Arabic / Persian 只在国家未知时辅助输出 `Middle East`。
-- [ ] English / Spanish / Chinese / French / Portuguese / Mixed 只作为语言展示，不得单独映射成国家地区。
+- [ ] 群名中的明确语言/国家证据未被无关讨论样本覆盖。
+- [ ] UI 文案未被识别为玩家语言。
+- [ ] `SEA`、`MY`、`MY/SG` 和跨大区冲突按规则处理。
+- [ ] 风险词先经语义裁决或安全过滤，再决定是否调用 GeoNames。
+- [ ] `Drama` 等高歧义词未产生错误地点查询。
+- [ ] GeoNames 查询不包含游戏名残词、交易词或普通社群词。
 
-## 相关性
+## 模型链
 
-- [ ] 同一个 `group_url` 在 `detail` 中只出现一次。
-- [ ] 多游戏批量检索时，同批次其他游戏已自动作为兄弟标题排斥。
-- [ ] `Anime Rangers X`、`Ragnarok X: Next Generation` 中的 `X` 未被删除或当作可选连接符。
-- [ ] `LINE Rangers` 不应大面积吸入 `LINE Idle Rangers`。
-- [ ] `Soul Land` 各子标题之间不应互相串群。
-- [ ] `Ragnarok` 各子标题不应仅靠词根互相命中。
-- [ ] `group_name` 命中兄弟游戏标题的记录，不应进入 `detail`。
-- [ ] `exact_phrase_in_full_text` 记录应进入 `manual_review`，而不是 `detail`。
-- [ ] `manual_review` 中每条记录均满足 `group_size >= 100`，且 `today_posts >= threshold` 或 `week_new_fans >= threshold`。
-- [ ] `manual_review` 包含 `group_size`、`today_posts`、`week_new_fans` 三列。
-- [ ] `manual_review` 的 A:AE 与 `detail` 字段名称和顺序完全一致。
-- [ ] `manual_review` 的 K/L 为公式单元格，数字格式为 `0.00%`。
-- [ ] 人工复核专属字段只从 AF 列开始追加。
-- [ ] `audit_stats.json` 中 `manual_review_dropped_group_size` 与 `manual_review_dropped_activity` 统计合理。
-- [ ] `compact_title_in_group_name` 可以进入 `detail`，但应能在 `debug_rows.json` 查到命中来源。
-- [ ] `connector_x_title_in_group_name` 只有通过更高活跃门槛后才可进入 `detail`。
+- [ ] 自定义 API 优先于 Codex CLI。
+- [ ] API 请求包含 JSON/Schema要求和供应商专用参数。
+- [ ] 低置信度 API 结果继续回退。
+- [ ] Codex CLI 为独立可执行 CLI，不是 WindowsApps 内部别名。
+- [ ] 模型不可用时采集继续回退本地规则。
 
-- [ ] 临时任务配置未含 `external_geocoder` 时，只要本地用户名存在，`audit_stats.json` 中 `external_geocoder_enabled=1` 且 `external_geocoder_enable_source` 合理。
-- [ ] 已抽查 `大马`、`Belgique`、`CZ/SK`、`🇫🇷`、`HK朋友交換群組` 等高确定性写法。
+## XLSX
 
+- [ ] `detail` 和 `manual_review` 公共列顺序一致。
+- [ ] 人工复核专属列位于公共列之后。
+- [ ] 活跃指数和规模增速为百分比格式。
+- [ ] 上传基础包中的字段顺序未被补丁重排。
+- [ ] 最终 workbook、summary、collision、audit、debug rows 均存在。
 
-## V5.2 地区误判专项检查
+## 完成与关机
 
-- [ ] `™`、`®`、`©`、`℠` 未触发国家代码。
-- [ ] 小写 `de`、普通单词前缀 `tr` 等未触发 `DE/TR`。
-- [ ] `Québec`、`台中`、`台南`、`Trójmiasto`、`Danmark` 等样例输出正确。
-- [ ] `Come`、`Gift`、`Compra`、`trades`、`Bay`、`Only`、`Daily` 等未作为 GeoNames accepted 查询。
-- [ ] `audit_stats.json` 中 `external_geocoder_filtered_queries` 有合理统计，且 `external_geocoder_accepted` 抽样无泛词假阳性。
+- [ ] Chrome 在最终文件校验后关闭。
+- [ ] 主计划任务执行后自动删除。
+- [ ] 默认不关机。
+- [ ] 仅在用户本轮指令明确要求且截止时间有效时关机。
+- [ ] 关机前完成文件、checkpoint、progress 和 token 均通过校验。
 
+## 接力任务
 
-## V5.2.2 ID 与 About 裁决专项检查
-
-- [ ] `... ID Thailand` 只输出 `TH`，账号 ID 未命中印度尼西亚。
-- [ ] 旧 task_config 中即使存在 `region_keywords.ID=["id", ...]`，运行时仍会移除 `id`。
-- [ ] 群名多个不同地区命中时已检查 About 所在地。
-- [ ] About 的具体地区与群名证据相容时，输出 About 的更具体地区。
-- [ ] About 无法裁决时，同业务大区才回退大区；跨业务大区保持空值。
-
-
-## V5.3.0 游戏名与 XLSX 专项检查
-
-- [ ] `Cookie Run: Kingdom Buy and Sell International` 不产生 `cookie / run / kingdom` GeoNames query。
-- [ ] `Cookie Run Kingdom Paris` 删除游戏标题后仍能保留 `Paris` 地点候选。
-- [ ] `Cookie Run Kingdom ESPAÑOL` 群名去除游戏标题后识别为 `Spanish`。
-- [ ] 帖子正文中反复出现游戏标题时，标题不计入 English 证据。
-- [ ] `partial_verified_rows.xlsx` 的 K/L 数据单元格显示为 `0.00%`。
-- [ ] 正常最终和恢复最终 XLSX 的 K/L 数据单元格同样显示为 `0.00%`。
-
-
-## V5.5.0 GeoNames 上下文专项检查
-
-- [ ] `Talk&Trade` 不产生 `talk` GeoNames query。
-- [ ] `GREEN-TOWN` 不产生 `green town` GeoNames query。
-- [ ] `@วิน` 等孤立泰语昵称不产生 GeoNames query。
-- [ ] `Jual/Beli`、`Pecinta Akun KUNING` 不产生 `jual / beli / akun / pecinta / kuning` query。
-- [ ] `Ovenbreak & Classic` 等已知游戏系列词不产生地点 query。
-- [ ] Thai 且 About 为空时输出 `TH`，不会被群名 GeoNames 覆盖。
-- [ ] Indonesian 且 About 为空时输出 `ID`，不会被群名 GeoNames 覆盖。
-- [ ] About 为 Simla/Shimla 时，About GeoNames 在 Thai 语言映射之前输出 `South Asia`。
-- [ ] 群名 `Paris / Boston / San Diego` 等精确地点仍可由 GeoNames 接受。
-- [ ] 包含式结果如 `talk -> Town Talk` 被标记为 `rejected_context_mismatch`。
-- [ ] `audit_stats.json.external_geocoder_rejected_context` 统计合理。
-
-
-## V5.6.0 GeoNames 多语种过滤专项检查
-
-- [ ] `Talk&Trade / Green Town / Jual Beli / Mua Bán / ซื้อขาย / بيع وشراء` 不产生 GeoNames query。
-- [ ] `PokeMonedas / Pok'emon` 不产生 `edas / pok / emon` 残词。
-- [ ] `San Diego / El Paso TX / San Antonio / Fort Worth` 不降级为最后一个单词。
-- [ ] `Orange County / Victoria BC / Santa Rosa` 保留完整短语；孤立 `Orange / Victoria / Santa` 被拦截。
-- [ ] `™ / de / ID / MY / TR / TM` 不被孤立解释为地区。
-- [ ] `Hàn Quốc / Danmark / Belgique / Schweiz / Trójmiasto / LATHAM / GDL / SEQ Brisbane` 输出预期地区。
-- [ ] `audit_stats.json.external_geocoder_context_restricted_queries` 和 `external_geocoder_filtered_queries` 可正常统计。
+- [ ] 使用 `queue_phase2_after_current.ps1`，没有临时拼接等待脚本。
+- [ ] 当前任务完成状态经过 finalization 验证。
+- [ ] 目标输入预检通过。
+- [ ] 接力启动经过实际进度健康检查。
+- [ ] 启动失败按配置重试并写入 `phase2_handoff_status.json`。

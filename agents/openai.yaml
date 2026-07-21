@@ -1,4 +1,4 @@
 interface:
-  display_name: Facebook Group Monitor V6.5.4
-  short_description: API-first semantic Facebook game-group monitoring with verified fallback and durable recovery.
-  default_prompt: 按 V6.5.4 流程运行 Facebook 群组监测。语义提供方固定为自定义 API、已验证的独立 Codex CLI、本地规则与受控 GeoNames。API 返回有效但低置信度结果时继续回退，不应判定为 API 调用失败。每个候选后保存完整 checkpoint。默认完成后不关机；根据用户本次文本生成 shutdown_policy.json。正常完成后关闭 Chrome 并删除本次计划任务。
+  display_name: Facebook Group Monitor V6.6.0
+  short_description: Two-stage Facebook group monitoring with verified startup and queued handoff recovery.
+  default_prompt: 按 V6.6.0 流程运行 Facebook 群组监测。第二轮启动前必须预解析 index、config、shutdown policy 和所有 candidate JSON；只有 phase2_progress.json 新增或更新且可读取后，才汇报启动成功。用户要求当前任务完成后接力时，使用 scripts/queue_phase2_after_current.ps1，不要临时生成带 BOM 的 JSON 或一次性等待脚本。语义提供方顺序为自定义 API、已验证的 Codex CLI、本地规则与受控 GeoNames。每个候选后保存完整 checkpoint。默认完成后不关机；根据用户本次文本生成 shutdown_policy.json。正常完成后关闭 Chrome 并删除计划任务。

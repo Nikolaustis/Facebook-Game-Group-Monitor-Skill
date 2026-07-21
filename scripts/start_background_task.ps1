@@ -16,6 +16,7 @@ param(
   [int]$PowerGuardPollSeconds = 5,
   [int]$ChromeStartTimeoutSeconds = 180,
   [int]$SchedulerStartupTimeoutSeconds = 45,
+  [int]$Phase2HealthTimeoutSeconds = 180,
   [string]$ScheduledTaskName = "",
   [switch]$ShutdownAfterComplete,
   [string]$ShutdownBefore = "",
@@ -37,11 +38,17 @@ function Add-QuotedArg([System.Collections.Generic.List[string]]$List, [string]$
   $List.Add((Quote-PSString $Value)) | Out-Null
 }
 
+function Write-Utf8NoBom([string]$Path, [string]$Text) {
+  $dir = Split-Path -Parent $Path
+  if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+  [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function Write-JsonAtomic([string]$Path, $Payload) {
   $dir = Split-Path -Parent $Path
   if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
   $tmp = "$Path.tmp-$PID-$(Get-Date -Format 'yyyyMMddHHmmssfff')"
-  $Payload | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $tmp -Encoding UTF8
+  Write-Utf8NoBom $tmp ($Payload | ConvertTo-Json -Depth 12)
   Move-Item -Force -LiteralPath $tmp -Destination $Path
 }
 
@@ -86,7 +93,7 @@ function Start-HiddenPowerShellProcess([string]$ScriptPath) {
 }
 
 function Get-RunnerHealth([string]$RunnerStatusPath) {
-  $result = [ordered]@{ healthy = $false; observed = $false; terminal = $false; status = 'missing'; runner_pid = $null; process_alive = $false; payload = $null }
+  $result = [ordered]@{ healthy = $false; observed = $false; terminal = $false; terminal_success = $false; terminal_failure = $false; status = 'missing'; runner_pid = $null; process_alive = $false; payload = $null }
   if (-not (Test-Path -LiteralPath $RunnerStatusPath)) { return [pscustomobject]$result }
   try {
     $payload = Get-Content -Raw -LiteralPath $RunnerStatusPath | ConvertFrom-Json
@@ -97,8 +104,10 @@ function Get-RunnerHealth([string]$RunnerStatusPath) {
       $result.runner_pid = [int]$payload.runner_pid
       $result.process_alive = $null -ne (Get-Process -Id ([int]$payload.runner_pid) -ErrorAction SilentlyContinue)
     }
-    $result.healthy = $result.process_alive -and ($result.status -in @('starting','phase2_running'))
-    $result.terminal = $result.status -in @('finished_success','finished_error','runner_error','already_completed_noop','duplicate_instance_ignored')
+    $result.healthy = $result.process_alive -and ($result.status -eq 'phase2_running') -and ($payload.startup_verified -eq $true)
+    $result.terminal_success = ($result.status -eq 'already_completed_noop') -or (($result.status -eq 'finished_success') -and ($payload.startup_verified -eq $true))
+    $result.terminal_failure = $result.status -in @('finished_error','runner_error','phase2_startup_failed','phase2_startup_timeout','duplicate_instance_ignored')
+    $result.terminal = $result.terminal_success -or $result.terminal_failure
   } catch {
     $result.status = 'invalid_status_json'
   }
@@ -134,7 +143,8 @@ function Wait-ForRunnerStart([string]$RunnerStatusPath, [string]$BootstrapStatus
   $lastBootstrap = $null
   while ((Get-Date) -lt $deadline) {
     $health = Get-RunnerHealth $RunnerStatusPath
-    if ($health.healthy -or $health.terminal) { return [pscustomobject]@{ started = $true; health = $health; bootstrap = $lastBootstrap } }
+    if ($health.healthy -or $health.terminal_success) { return [pscustomobject]@{ started = $true; health = $health; bootstrap = $lastBootstrap } }
+    if ($health.terminal_failure) { return [pscustomobject]@{ started = $false; health = $health; bootstrap = $lastBootstrap } }
     if (Test-Path -LiteralPath $BootstrapStatusPath) {
       try {
         $lastBootstrap = Get-Content -Raw -LiteralPath $BootstrapStatusPath | ConvertFrom-Json
@@ -231,6 +241,12 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
   $Index = (Resolve-Path $Index).Path
   if (-not [string]::IsNullOrWhiteSpace($Config)) { $Config = (Resolve-Path $Config).Path }
 
+  $InputValidation = Join-Path $RunDir 'phase2_input_validation.json'
+  $validationArgs = @((Join-Path $RootDir 'scripts\validate_phase2_inputs.js'),'--index',$Index,'--out-report',$InputValidation,'--shutdown-policy-file',$ShutdownPolicyFile)
+  if (-not [string]::IsNullOrWhiteSpace($Config)) { $validationArgs += @('--config',$Config) }
+  & node @validationArgs
+  if ($LASTEXITCODE -ne 0) { throw "Phase 2 input validation failed. See: $InputValidation" }
+
   if ([string]::IsNullOrWhiteSpace($ScheduledTaskName)) {
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
@@ -305,6 +321,8 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     power_guard_poll_seconds = [Math]::Max(2, $PowerGuardPollSeconds)
     chrome_start_timeout_seconds = [Math]::Max(30, $ChromeStartTimeoutSeconds)
     scheduler_startup_timeout_seconds = [Math]::Max(10, $SchedulerStartupTimeoutSeconds)
+    phase2_health_timeout_seconds = [Math]::Max(30, $Phase2HealthTimeoutSeconds)
+    input_validation_report = $InputValidation
     launcher_mode = 'wscript_wmi_windowless'
     bootstrap_script = $Bootstrap
     bootstrap_status = $BootstrapStatus
@@ -327,7 +345,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
   $bootstrapLines.Add(('$stderrPath = ' + (Quote-PSString $StderrLog))) | Out-Null
   $bootstrapLines.Add('function Write-BootstrapStatus([string]$Status, [string]$ErrorMessage = '''') {') | Out-Null
   $bootstrapLines.Add('  $payload = [ordered]@{ status=$Status; bootstrap_pid=$PID; updated_at=(Get-Date).ToString(''o''); error=$ErrorMessage }') | Out-Null
-  $bootstrapLines.Add('  $tmp = "$statusPath.tmp-$PID"; $payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $tmp -Encoding UTF8; Move-Item -Force -LiteralPath $tmp -Destination $statusPath') | Out-Null
+  $bootstrapLines.Add('  $tmp = "$statusPath.tmp-$PID"; [System.IO.File]::WriteAllText($tmp, ($payload | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false))); Move-Item -Force -LiteralPath $tmp -Destination $statusPath') | Out-Null
   $bootstrapLines.Add('}') | Out-Null
   $bootstrapLines.Add('Write-BootstrapStatus ''bootstrap_started''') | Out-Null
   $bootstrapLines.Add('try {') | Out-Null
@@ -336,7 +354,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
   $bootstrapLines.Add('} catch {') | Out-Null
   $bootstrapLines.Add('  $message = $_.Exception.ToString(); Add-Content -LiteralPath $stderrPath -Value "[bootstrap] fatal_at=$((Get-Date).ToString(''o''))`n$message"; Write-BootstrapStatus ''bootstrap_error'' $message; exit 1') | Out-Null
   $bootstrapLines.Add('}') | Out-Null
-  Set-Content -LiteralPath $Bootstrap -Value ($bootstrapLines -join [Environment]::NewLine) -Encoding UTF8
+  Write-Utf8NoBom $Bootstrap ($bootstrapLines -join [Environment]::NewLine)
 
   $userId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
   $HiddenLauncher = Join-Path $RootDir "scripts\hidden_powershell_launcher.vbs"
@@ -366,13 +384,13 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
       $arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Bootstrap`""
       $action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument $arguments -WorkingDirectory $RootDir
     }
-    Register-ScheduledTask -TaskName $ScheduledTaskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description "Facebook Group Monitor V6.5.4 phase 2; verified startup; reboot-resumable; self-deletes after execution." -Force | Out-Null
+    Register-ScheduledTask -TaskName $ScheduledTaskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description "Facebook Group Monitor V6.6.0 phase 2; verified startup; reboot-resumable; self-deletes after execution." -Force | Out-Null
     Start-ScheduledTask -TaskName $ScheduledTaskName
   }
 
   $attempts = New-Object System.Collections.Generic.List[object]
   Register-AndStartPhase2Task 'wscript_wmi_windowless'
-  $first = Wait-ForRunnerStart $RunnerStatus $BootstrapStatus $SchedulerStartupTimeoutSeconds
+  $first = Wait-ForRunnerStart $RunnerStatus $BootstrapStatus ([Math]::Max(60, $ChromeStartTimeoutSeconds + $Phase2HealthTimeoutSeconds + 30))
   $attempts.Add([ordered]@{
     mode = 'wscript_wmi_windowless'
     started = [bool]$first.started
@@ -389,7 +407,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     Remove-Item -Force -LiteralPath $RunnerStatus,$BootstrapStatus -ErrorAction SilentlyContinue
     Set-ManifestLauncherMode $Manifest 'task_scheduler_direct_powershell_hidden'
     Register-AndStartPhase2Task 'task_scheduler_direct_powershell_hidden'
-    $second = Wait-ForRunnerStart $RunnerStatus $BootstrapStatus $SchedulerStartupTimeoutSeconds
+    $second = Wait-ForRunnerStart $RunnerStatus $BootstrapStatus ([Math]::Max(60, $ChromeStartTimeoutSeconds + $Phase2HealthTimeoutSeconds + 30))
     $attempts.Add([ordered]@{
       mode = 'task_scheduler_direct_powershell_hidden'
       started = [bool]$second.started
@@ -404,7 +422,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
       Remove-Item -Force -LiteralPath $RunnerStatus,$BootstrapStatus -ErrorAction SilentlyContinue
       Set-ManifestLauncherMode $Manifest 'hidden_direct_emergency_fallback'
       $fallbackProcess = Start-HiddenPowerShellProcess $Bootstrap
-      $third = Wait-ForRunnerStart $RunnerStatus $BootstrapStatus ([Math]::Max(20, [int]($SchedulerStartupTimeoutSeconds / 2)))
+      $third = Wait-ForRunnerStart $RunnerStatus $BootstrapStatus ([Math]::Max(60, $ChromeStartTimeoutSeconds + $Phase2HealthTimeoutSeconds + 30))
       $attempts.Add([ordered]@{
         mode = 'hidden_direct_emergency_fallback'
         started = [bool]$third.started
@@ -478,7 +496,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     note = if ($effectiveMode -eq 'hidden_direct_emergency_fallback') {
       'Both scheduler launch paths failed health checks. Failed tasks were removed and a hidden direct process was used; restart recovery is unavailable for this run.'
     } else {
-      'The scheduled runner passed PID health checks with no visible PowerShell window; shutdown coordination remains in the runner.'
+      'The scheduled runner passed input parsing and phase2 progress health checks with no visible PowerShell window; shutdown coordination remains in the runner.'
     }
   }
   Write-JsonAtomic $StatusFile $status
@@ -546,6 +564,12 @@ if ($Task -eq "login") {
   }
   if ([string]::IsNullOrWhiteSpace($Index)) { throw "phase2 requires -Index, or phase1_index.json in -RunDir." }
   $Index = (Resolve-Path $Index).Path
+  if (-not [string]::IsNullOrWhiteSpace($Config)) { $Config = (Resolve-Path $Config).Path }
+  $InputValidation = Join-Path $RunDir 'phase2_input_validation.json'
+  $validationArgs = @((Join-Path $RootDir 'scripts\validate_phase2_inputs.js'),'--index',$Index,'--out-report',$InputValidation,'--shutdown-policy-file',$ShutdownPolicyFile)
+  if (-not [string]::IsNullOrWhiteSpace($Config)) { $validationArgs += @('--config',$Config) }
+  & node @validationArgs
+  if ($LASTEXITCODE -ne 0) { throw "Phase 2 input validation failed. See: $InputValidation" }
   $cmd = New-Object System.Collections.Generic.List[string]
   $cmd.Add('& node') | Out-Null
   Add-QuotedArg $cmd (Join-Path $RootDir "scripts\phase2_collect_details.js")
@@ -627,7 +651,7 @@ if ($Task -eq "login") {
 $lines.Add('$finishedAt = Get-Date') | Out-Null
 $lines.Add('"[background] finished_at=$($finishedAt.ToString("o")) exit_code=$exitCode"') | Out-Null
 $lines.Add('exit $exitCode') | Out-Null
-Set-Content -LiteralPath $Wrapper -Value ($lines -join [Environment]::NewLine) -Encoding UTF8
+Write-Utf8NoBom $Wrapper ($lines -join [Environment]::NewLine)
 
 $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
   "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
@@ -663,5 +687,5 @@ $status = [ordered]@{
   launch_mode = "hidden_start_process"
   note = "The background task was started with hidden-window settings; the current PowerShell/Codex command can exit."
 }
-$status | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $StatusFile -Encoding UTF8
+Write-Utf8NoBom $StatusFile ($status | ConvertTo-Json -Depth 5)
 $status | ConvertTo-Json -Depth 5

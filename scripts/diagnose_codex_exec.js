@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { readJsonFile } = require('./json_io');
 const {
   mergeSemanticRegionResolverConfig,
   ensureCodexPreflight,
@@ -17,7 +18,7 @@ function hasFlag(name) {
 
 function readJson(file) {
   if (!file || !fs.existsSync(file)) return {};
-  return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+  return readJsonFile(file);
 }
 
 async function main() {
@@ -30,7 +31,7 @@ async function main() {
   const preflight = await ensureCodexPreflight(config.codex_exec, stats);
   const report = {
     diagnostic_kind: 'facebook_group_monitor_codex_exec_manual_check',
-    version: '6.5.4',
+    version: '6.6.0',
     checked_at: new Date().toISOString(),
     preflight,
     stats,

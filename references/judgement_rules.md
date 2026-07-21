@@ -1,189 +1,108 @@
-# 判定与过滤规则（V5.8.0）
+# 判定与过滤规则
 
-## A. 第一轮：搜索与深翻页
-1. Skill 支持一次任务同时检索多个游戏。每个游戏必须独立生成搜索计划，不能把某个游戏的特殊变体扩散到其他游戏。
-2. 对所有游戏自动生成低风险标题变体：
-   - 原始标题，例如 `All Star Tower Defense`。
-   - 标点/冒号/破折号归一标题，例如 `Ragnarok : The New World` -> `Ragnarok The New World`。
-   - 少空格/去空格紧凑标题，例如 `All Star Tower Defense` -> `Allstar Tower Defense`、`All Star TowerDefense`、`Allstar TowerDefense`。
-3. 禁止自动生成过宽关键词，例如 `Anime`、`Ragnarok`、`Tower Defense`、`All Star`。
-4. `connector_x` 是高风险受控变体，默认关闭。只有配置 `title_variant_overrides[game].search_variants` 后才可搜索，例如 `All Star X Tower Defense`。
-5. 原始标题自带 `X` 的游戏，例如 `Anime Rangers X`、`Ragnarok X: Next Generation`，`X` 是正式标题 token，不能删除，也不能被当作可选连接符。
-6. `seed_group_urls` 只表示“强制进入第二轮检查”，不代表自动进入最终 `detail`。
-7. 第一轮候选必须保留审计字段：`source_query`、`query_variant_type`、`source_game_name`、`source_is_seed_url`、`source_queries`、`query_variant_types`。
-8. 深翻停止条件满足任一项即可进入人工确认：
-   - 页面提示无更多结果。
-   - 连续 3 次下滑无新增群组。
-   - 搜索结果列表不再增长。
-9. 到达停止条件后，必须先询问用户：“可以停止，继续 / 继续深翻”。用户未确认前，不得进入第二轮。
+## 第一轮
 
-## B. 第二轮：详情采集
-1. 候选处理顺序：
-   - 先读取搜索卡片中的成员规模。
-   - `group_size < 100`：不进入 `/about`，不进入最终输出。
-   - `group_size >= 100` 且第一轮已有完整群名：先做本地群名相关性预筛。
-   - 群名明确无目标标题、alias、受控变体、兄弟标题或 IP root 证据：直接跳过，不打开 `/about` 或讨论页。
-   - 强命中和人工复核型弱命中继续进入详情采集。
-   - seed URL、群名缺失或明显截断：预筛视为无法判断，继续打开 `/about`。
-2. `/about` 最多尝试 2 次，失败且无法获得核心指标时不得输出。
-3. 若第一轮候选来自 `seed_group_urls` 且卡片没有群名，第二轮应从 Facebook 页面标题或群组标题中补取 `group_name` 后再判定。
-4. 预筛只用于节省页面访问；通过预筛后仍必须执行原有完整相关性、规模、活跃度、语言、地区和冲突判断。
-5. 语言识别必须优先参考讨论区前五条玩家发言；群组名称为辅助；“关于这个小组”只采集社区成员手写文本，且优先级最低。
-6. Facebook 中文界面、导航、按钮、固定提示、系统结构文案不得作为语言判断证据。
+- 每个游戏独立生成搜索计划，保留原始标题、标点归一和受控紧凑变体。
+- 禁止自动扩展为过宽 IP 词根或通用品类词。
+- `seed_group_urls` 只强制进入第二轮检查，不代表自动进入最终结果。
+- 候选必须保留 `source_query`、`query_variant_type`、`source_game_name`、`source_is_seed_url` 等审计信息。
+- 到达深翻停止条件后必须等待用户确认再进入第二轮。
 
-## C. 相关性规则
-1. `exact_phrase_in_group_name`：群名按词序完整命中原始标题或明确 alias，是强正样本。
-2. `compact_title_in_group_name`：群名命中去空格/少空格后的目标标题，例如 `Allstar TowerDefense`，可作为正样本继续进入最终筛选。
-3. `connector_x_title_in_group_name`：群名命中配置 allowlist 中允许的 X 连接变体，例如 `All Star X Tower Defense`，可作为弱正样本继续进入最终筛选，但必须使用更高活跃门槛。
-4. `exact_phrase_in_full_text`：仅 about/snippet/full_text 命中目标标题，进入人工复核，默认不直接进入最终输出。
-5. `ip_root_in_group_name`：群名只命中 IP 大词根但未命中完整标题，进入人工复核，默认不直接进入最终输出。
-6. 多游戏批量检索时，系统必须自动把同批次其他游戏合并进当前游戏的 `sibling_titles`。如果配置中已有 `sibling_titles`，则与自动同批次兄弟标题合并。
-7. `group_name` 命中兄弟游戏标题时，兄弟排斥优先于弱变体命中和 full_text 命中。
-8. 禁止以下宽松规则：
-   - 3 个 token 命中 2 个就算相关。
-   - 2 个 token 命中 1 个就算相关。
-   - 只要出现 IP 词根就进入最终明细。
+## 第二轮预筛与采集
 
-## D. 输出门槛
-最终 Excel 的 `detail` 工作表仅保留全部满足以下条件的记录：
+- 卡片成员数低于 100 时直接跳过。
+- 第一轮已有完整群名时，先匹配目标标题、别名、受控变体、兄弟标题和 IP root；明显无关项不打开 About 或讨论页。
+- seed URL、群名缺失或明显截断时继续打开页面核验。
+- 预筛通过后仍需执行完整相关性、规模、活跃度、语言、地区和跨游戏冲突判断。
+- About 抓取失败且核心指标不可得时不得进入正式输出。
+
+## 相关性
+
+强相关：
+
+- `exact_phrase_in_group_name`
+- `compact_title_in_group_name`
+- 通过专用门槛的 `connector_x_title_in_group_name`
+
+人工复核：
+
+- `exact_phrase_in_full_text`
+- `ip_root_in_group_name`
+- 群名明确命中兄弟游戏标题
+
+禁止通过“部分 token 命中”或只出现 IP 词根直接进入 `detail`。
+
+## 输出门槛
+
+`detail` 必须同时满足：
+
 - `group_size >= 100`
-- `is_relevant = yes`
-- 若配置了 `allowed_language_signals`，则 `language` 必须命中允许列表。
-- 若配置了 `allowed_regions`，则 `region` 必须命中允许列表。
-- 满足活跃门槛之一：`today_posts >= threshold` 或 `week_new_fans >= threshold`。
+- 相关性成立
+- 通过已配置的语言/地区限制
+- `today_posts >= threshold` 或 `week_new_fans >= threshold`
 
-### 变体专用门槛
-- `compact_title_in_group_name` 默认使用全局活跃门槛。
-- `connector_x_title_in_group_name` 默认使用更高门槛：
-  - `group_size >= 1000`
-  - 且 `today_posts >= max(global threshold, 20)` 或 `week_new_fans >= max(global threshold, 50)`
-- 如果 `title_variant_overrides` 中为该 `connector_x` 变体配置了 `min_group_size`、`min_today_posts`、`min_week_new_fans`，以配置值为准，但不得低于全局 threshold。
+人工复核也必须先通过相同规模和活跃度门槛。
 
-## E. 语言与地区判定
-1. `language` 必须参考群组名称、讨论区前五条玩家发言，以及用户手写 about 文本。
-2. 讨论区前五条玩家发言是语言识别的最高优先级。
-3. 讨论区前五条必须先逐条识别语言，再汇总判断；若前五条中出现两个以上可信语言，`language = Mixed`。无正文帖、图片/视频帖、或只有极短正文且只抓到 Facebook UI 文案的帖子不得计入语言样本。
-4. 群组名称可作为语言辅助信号，但不得单独覆盖讨论区中更明确的语言证据。
-5. about 文本只允许使用社区成员手写内容；如果 about 区域只有 Facebook UI 结构文本，则不得参考。讨论区同理，不得把中文界面的按钮、时间、互动统计、评论入口、翻译入口作为 `Chinese` 证据。
-6. 蒙古语与俄语的西里尔字母必须区分：`Ө/ө`、`Ү/ү` 为蒙古语的直接强证据；不含这些字母的文本可通过高确定性蒙古语词组（如 `сайн байна`、`байна уу`、`баярлалаа`、`тоглоом`、`тоглогч`、`зарна`、`авна`、`солно`）识别为 `Mongolian`。只有缺少这些蒙古语证据的通用西里尔文本，才可作为 `Russian`。地理名称 `Mongolia` / `Mongolian` 不得单独成为语言证据。
-7. `region` 采用“国家/地区识别 -> 业务区域归并输出 -> 同大区多命中折叠”的三层规则。优先从 `group_name` 中识别明确国家、地区、属地、大区、受控别名或国旗 emoji。短代码允许紧贴非拉丁文字，但不得在普通英文单词内部误命中。
-8. 东亚与东南亚单一具体国家/地区按自身输出。若群名同时命中多个不同地区，必须先用 About 所在地裁决；只有 About 无法裁决时，同一业务大区的多命中才折叠为 `EA`、`SEA` 或 `EUR`，跨业务大区冲突保持空值。
-9. Middle East、Central Asia、South Asia、North America、LATAM、Africa、EUR、Oceania 按业务大区归并；BR 单列；TR、NL、DE、FR、IT、PL、RU 单列。若多个命中项都属于同一业务大区，则输出该业务大区，例如 `DE + FR` 输出 `EUR`。
-10. 若命中项跨业务大区，则视为 `keyword_conflict` 并留空，例如 `UAE + PH`、`US + BR`、`JP + TH`。
-11. 若明确识别到非洲国家，即使语言是 Arabic，也必须优先输出 `Africa`；Egypt 例外，归入 `Middle East`。
-12. 未命中群名地区语义时，仅允许高确定性语言辅助映射：Thai -> TH、Vietnamese -> VN、Indonesian -> ID、Malay -> MY、Filipino -> PH、Lao -> LA、Khmer -> KH、Burmese -> MM、Arabic/Persian -> Middle East。
-13. English、Spanish、Chinese、French、Portuguese、Mixed 不得单独映射为国家地区。
-14. 若群名本地规则与 GeoNames 群名验证、允许的语言映射均无法确定 `region`，才可读取 About 页中明确标注的“所在地 / Location”字段：先识别国家/地区，再识别 `about_location_city_keywords` 中配置的高确定性城市。该位置兜底不得覆盖前述已得到的地区结论；若群名存在跨大区冲突，About 所在地可作为最终可信位置证据重新判定。
-15. 不设置语言或地区硬限制时，所有地区和语言均可收录，但必须展示识别结果与来源字段。
+## 语言
 
-## F. 不输出规则
-以下记录不得进入 `detail` 工作表：
-- 成员数 `< 100`。
-- 明确不相关。
-- `group_name` 命中兄弟游戏标题。
-- `match_type = exact_phrase_in_full_text`。
-- `match_type = ip_root_in_group_name`。
-- `connector_x_title_in_group_name` 未通过变体专用门槛。
-- 不满足已配置的语言或地区限制。
-- `/about` 失败且无法获取核心指标。
-- 同一 `group_url` 归属冲突且最高分并列。
+- 明确的群名语言/国家证据优先用于防止讨论样本覆盖标题中的强语言信号。
+- 其余情况以讨论区前五条有效玩家发言为主要证据，逐条识别后汇总。
+- 多个可信语言并存时输出 `Mixed`。
+- Facebook UI、按钮、时间、互动统计和系统提示不得作为语言证据。
+- About 仅使用社区成员手写文本。
+- 蒙古语强字符与词组优先于通用西里尔文的俄语判断。
 
-## G. 人工复核队列
-人工复核是相关性复核，不是低质量候选暂存区。以下弱相关记录只有在先通过数据门槛后，才进入 Excel 的 `manual_review` 工作表，且不得混入 `detail`：
-- 仅 `full_text` 命中目标完整标题。
-- `group_name` 命中 IP 大词根但未命中目标完整标题。
-- `group_name` 命中兄弟游戏标题。
-- `match_type = exact_phrase_in_full_text`。
+## 地区
 
-人工复核数据门槛与普通命中一致：
-- `group_size >= 100`；
-- 且 `today_posts >= threshold` 或 `week_new_fans >= threshold`。
+判定顺序：
 
-任何一项不达标时直接丢弃，不进入 `manual_review`。V5.4.0 起：
-- A:AE 与 `detail` 完全一致，可直接批量复制粘贴。
-- K/L 使用相同公式和 `0.00%` 格式。
-- AF:AO 依次保存 `language_signal`、`about_location`、`match_type`、`matched_phrase`、`negative_hit`、`review_reason`、`source_query`、`query_variant_type`、`source_is_seed_url`、`variant_threshold_applied`。
+1. 群名中的明确国家、地区、国旗、受控大区代码和高确定性本地别名。
+2. About Location 本地规则。
+3. About Location GeoNames。
+4. 允许的高确定性语言映射。
+5. 风险/歧义语义模型裁决。
+6. 模型允许后执行群名 GeoNames。
+7. 无可靠结果时保持未映射。
 
-## H. 跨游戏去重归属
-1. 同一 `group_url` 只允许在 `detail` 工作表输出一条。
-2. 如果同一群组被多个游戏同时命中：
-   - 分数最高者保留。
-   - 最高分并列时全部丢弃，并写入 `collision_report.json`。
-3. 分数优先级：
-   - `exact_phrase_in_group_name` 最高。
-   - `compact_title_in_group_name` 次之。
-   - `connector_x_title_in_group_name` 再次之。
-   - `exact_phrase_in_full_text` 和 `ip_root_in_group_name` 默认只进人工复核。
+规则：
 
-## I. action 判定
-- `existed_last_month=yes` -> `update`
-- `existed_last_month=no` -> `add`
-- `existed_last_month` 缺失 -> `action` 留空
+- `SEA` 仅在游戏名之外以明确大写业务代码出现时识别为东南亚。
+- `MY` 以独立大写代码出现时表示马来西亚；小写 `my` 不匹配。
+- `MY/SG` 等同属东南亚的明确并列国家折叠为 `SEA`。
+- 同一业务区域的多个国家可折叠为该业务区域；跨业务区域并置时保持未映射。
+- `GLOBAL` 或明确全球范围不能被单一地区词覆盖。
+- 孤立 `ID` 默认按账号 ID 处理，除非有印度尼西亚的语言、旗帜、完整名称、城市或 About 证据。
+- 国家短代码必须保持原始大写并满足边界，不能从普通单词、商标符号或词内片段产生。
 
-## J. action_reason 规则
-输出记录必须填写 `action_reason`，示例：
-- `today_posts>=10; existed_last_month=yes`
-- `week_new_fans>=10; existed_last_month=no`
-- `today_posts>=20; existed_last_month=missing`
+## GeoNames 安全规则
 
-## K. risk_level 规则
-- `low`：完整标题命中或紧凑标题命中于群名，且关键字段完整。
-- `medium`：`connector_x_title_in_group_name`，或字段部分缺失但结论明确。
-- `high`：仅靠弱信号命中，或存在冲突边界；高风险记录建议直接进入人工复核或丢弃。
+- 查询前移除当前游戏、别名、受控变体、兄弟标题和 IP root；包含游戏实体的融合 token 整体删除，不能产生残词。
+- 多词地点保留完整短语，不降级为普通单词。
+- 交易、社群、账号、活动、邀请码及多语种功能词属于停用词。
+- `Drama`、`Solo`、`Orange`、`Victoria`、`Georgia`、`Phoenix`、`Classic`、`Beta`、`Mania`、`League` 等高歧义词不得孤立查询。
+- 上下文受限词只有在完整地点短语和明确行政上下文中才可查询。
+- 单 token 结果必须精确匹配，并满足高层级行政实体、首府或人口门槛。
+- GeoNames 结果与高确定性语言冲突且缺少 About/明确地点支持时拒绝。
 
-16. GeoNames 启用顺序：任务配置显式开关 > 本地配置显式开关 > 检测到本地/环境变量用户名时自动启用；显式 false 不得被自动启用覆盖。
+## 语义模型
 
+调用顺序：
 
-## V5.2 地区精度补充规则
+```text
+配置 API → Codex CLI → 本地规则与受控 GeoNames
+```
 
-17. 两到三位国家/地区代码只在原始文本中以大写代码出现且满足拉丁文字边界时生效；小写介词、普通单词内部片段和 Unicode 兼容符号不得命中。
-18. 商标/版权符号必须在 NFKC 归一化前移除，尤其禁止 `™ -> TM` 触发土库曼斯坦。
-19. 群名中的高确定性城市/省州映射位于 GeoNames 前，至少覆盖 `Québec`、`台中`、`台南/臺南`、`Trójmiasto`、`SoCal`；`Danmark` 作为高确定性国家别名映射到 `EUR`。
-20. GeoNames 查询必须通过泛词和句子安全检查。交易、礼物、邀请、社群、等级、英文翻译句等非地点词不得请求 GeoNames。
-21. 多词地点优先保持完整短语；若首个结果歧义，可继续尝试后续更明确候选。
-22. `unsafe_query` 不得写入缓存或地区结果，并计入 `external_geocoder_filtered_queries`。
+模型只判断地点意图、候选地点、显式地区和范围，不得直接写最终标准化地区。输出必须通过 Schema、来源文本支持和置信度门槛。低置信度 API 结果继续回退。
 
+## 跨游戏去重
 
-## V5.2.1 人工复核门槛补充
+- 同一规范化 `group_url` 在 `detail` 中最多保留一条。
+- 最高相关性分数者保留；最高分并列时全部移出正式结果并写入冲突报告。
+- 兄弟游戏应尽量在同一第二轮任务中处理，以复用页面数据并统一归属竞争。
 
-23. `manual_review` 写入必须发生在规模与活跃阈值验证之后。
-24. `audit_stats.json` 必须分别记录人工复核候选数、因规模不达标淘汰数、因活跃度不达标淘汰数。
-25. 人工复核表必须展示 `group_size`、`today_posts`、`week_new_fans`，避免人工复核无业务价值的候选。
+## action 与风险
 
-
-## V5.2.2 ID 与多地区冲突补充规则
-
-23. 孤立 `ID` 不得作为印度尼西亚国家代码；即使旧任务配置仍包含该关键词，也必须在运行时过滤。
-24. 印度尼西亚可由 `Indonesia / Indo`、印尼语、印尼城市、🇮🇩、About Location 或 GeoNames 判断。
-25. 群名的 `keyword_hits` 出现两个或更多不同地区时，必须先解析 About 所在地；About 结果只有与至少一个群名地区证据处于同一国家或同一业务大区时才可裁决。
-26. About 无法裁决时，同业务大区多命中可回退为大区；跨业务大区不得由语言映射强行覆盖。
-
-
-## V5.3.0 游戏名称隔离规则
-
-- GeoNames 只能接收从群名中删除当前游戏正式名称、aliases、受控变体与高确定性 IP 根词后的剩余地点候选。
-- 当前游戏标题的组成词不得单独成为 GeoNames query。
-- 语言识别对群名、About 用户文本、discussion posts 和 snippet 使用同一标题屏蔽集合。
-- 屏蔽只用于地区候选和语言识别，不改变相关性匹配使用的原始群名。
-
-
-## V5.5.0 地区上下文规则
-
-27. 群名没有明确地区证据时，About Location 本地规则和 GeoNames 必须先于语言映射。
-28. About 仍无结果时，允许的高确定性语言映射必须先于群名 GeoNames；语言已有 `TH/ID/MY/...` 结果时不得再调用群名 GeoNames。
-29. 群名 GeoNames 只接受 query 与 GeoNames 主名称或 alternate name 完全一致的结果；前缀/包含式匹配必须记为 `rejected_context_mismatch`。
-30. 泰语、印尼语、马来语交易词、普通社群词、游戏系列词和孤立非拉丁文字 token 不得成为群名 GeoNames query。
-31. GeoNames query 屏蔽集合应包含本批次所有游戏实体名称、aliases、兄弟标题、IP roots 与受控变体。
-32. 缓存使用 `geonames-v5.5` namespace；旧缓存不得影响 V5.5.0。
-
-
-## V5.6.0 GeoNames 候选安全规则
-
-33. 群名进入 GeoNames 前必须清除所有已知游戏名称、别名、兄弟标题、IP root 和受控变体；包含游戏实体的融合 token 整体删除，不得产生残词。
-34. 多词候选只保留完整地点短语，不得生成其任意单词子集；只有清洗后本来就是单 token 时才允许单 token 查询。
-35. 英/泰/越/印尼/马来/西/葡/法/中/阿语的交易、社区、邀请码、活动、账号等词属于硬停用词。
-36. `Bay / Santa / Orange / Victoria / Georgia / Phoenix / Classic / Beta / Mania / League / Latham` 等属于上下文受限词：孤立出现不得查询，带 `County / State / BC / USA` 等明确上下文的完整短语可查询。
-37. 群名单 token GeoNames accepted 需满足：精确名称匹配，且 feature code 为国家、ADM1、首府/PPLA，或人口不少于配置值（默认 50,000）。
-38. `ID / IN / IT / NO / TO / ME / MY / LA / DE / TR / TM / AT / IS / BE` 不得作为孤立国家码；完整国家名、国旗、语言、城市或 About 证据仍可判定。
-39. `Georgia` 单独出现不得直接解释为格鲁吉亚；需 `Georgia country / საქართველო`、About 或 GeoNames 上下文。
-40. 缓存使用 `geonames-v5.6` namespace。
+- `existed_last_month=yes` → `update`
+- `existed_last_month=no` → `add`
+- 缺失时 `action` 留空
+- 完整标题强命中且字段完整为低风险；受控弱变体或部分字段缺失为中风险；弱信号或冲突边界进入人工复核或丢弃。

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
+const { readJsonFile } = require('./json_io');
 
 function clean(s) {
   return (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
@@ -26,7 +27,7 @@ function loadConfig(configFile) {
   if (!configFile) return {};
   const p = path.resolve(configFile);
   if (!fs.existsSync(p)) return {};
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
+  return readJsonFile(p);
 }
 
 function writeJsonAtomic(file, obj) {

@@ -6,6 +6,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Write-Utf8NoBom([string]$Path, [string]$Text) {
+  $dir = Split-Path -Parent $Path
+  if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+  [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function Read-JsonSafe([string]$Path) {
   try { return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json } catch { return $null }
 }
@@ -13,7 +19,7 @@ function Write-JsonAtomic([string]$Path, $Payload) {
   $dir = Split-Path -Parent $Path
   if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
   $tmp = "$Path.tmp-$PID-$(Get-Date -Format 'yyyyMMddHHmmssfff')"
-  $Payload | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $tmp -Encoding UTF8
+  Write-Utf8NoBom $tmp ($Payload | ConvertTo-Json -Depth 16)
   Move-Item -Force -LiteralPath $tmp -Destination $Path
 }
 function Test-UsableFile([string]$Path, [int64]$MinimumBytes = 2) {

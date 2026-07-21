@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { chromium } = require('playwright');
 const { createCodexProgressReporter, parseProgressReportEveryMinutes } = require('./progress_reporter');
+const { readJsonFile, readTextAuto } = require('./json_io');
 
 function clean(s) {
   return (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
@@ -107,13 +108,13 @@ function loadConfig(configFile) {
   if (!configFile) return {};
   const p = path.resolve(configFile);
   if (!fs.existsSync(p)) return {};
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
+  return readJsonFile(p);
 }
 
 function loadGamesFromFile(gamesFile) {
   if (!gamesFile) return [];
   const p = path.resolve(gamesFile);
-  const raw = fs.readFileSync(p, 'utf8');
+  const raw = readTextAuto(p).text;
   let parsed;
   try {
     parsed = JSON.parse(raw);

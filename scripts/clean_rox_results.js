@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
+const { readJsonFile } = require('./json_io');
 
 function parseArgs(argv) {
   const out = {};
@@ -95,7 +96,7 @@ const fields = [
   '__region_keyword_hits',
 ];
 
-const debugRows = JSON.parse(fs.readFileSync(debugPath, 'utf8'));
+const debugRows = readJsonFile(debugPath);
 const kept = [];
 const removed = [];
 

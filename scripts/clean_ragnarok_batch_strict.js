@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
+const { readJsonFile } = require('./json_io');
 
 function parseArgs(argv) {
   const out = {};
@@ -139,7 +140,7 @@ const fields = [
 
 const kept = [];
 const removed = [];
-for (const row of JSON.parse(fs.readFileSync(debugPath, 'utf8'))) {
+for (const row of readJsonFile(debugPath)) {
   const out = { ...row };
   out.language = row.language_signal || row.language || '';
   out.group_id = String(row.group_id || '');

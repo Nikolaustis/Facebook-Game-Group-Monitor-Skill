@@ -5,6 +5,12 @@ param(
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
+
+function Write-Utf8NoBom([string]$Path, [string]$Text) {
+  $dir = Split-Path -Parent $Path
+  if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+  [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
 $RunDir = [System.IO.Path]::GetFullPath($RunDir)
 New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
 $StatusFile = Join-Path $RunDir 'runtime_power_guard_status.json'
@@ -38,7 +44,7 @@ function Write-GuardStatus([string]$Status, [hashtable]$Extra = @{}) {
   }
   foreach ($key in $Extra.Keys) { $payload[$key] = $Extra[$key] }
   $tmp = "$StatusFile.tmp-$PID"
-  $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $tmp -Encoding UTF8
+  Write-Utf8NoBom $tmp ($payload | ConvertTo-Json -Depth 6)
   Move-Item -Force -LiteralPath $tmp -Destination $StatusFile
 }
 

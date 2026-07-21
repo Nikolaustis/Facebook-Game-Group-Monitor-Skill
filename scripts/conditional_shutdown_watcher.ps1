@@ -1,4 +1,4 @@
-﻿param(
+param(
   [Parameter(Mandatory = $true)][int]$WatchPid,
   [Parameter(Mandatory = $true)][string]$Completion,
   [Parameter(Mandatory = $true)][string]$OutXlsx,
@@ -17,6 +17,12 @@
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Write-Utf8NoBom([string]$Path, [string]$Text) {
+  $dir = Split-Path -Parent $Path
+  if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+  [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
 
 function Read-JsonSafe([string]$Path) {
   try { return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json } catch { return $null }
@@ -41,7 +47,7 @@ function Write-Status([string]$Status, [hashtable]$Extra = @{}) {
   $dir = Split-Path -Parent $StatusFile
   if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
   $tmp = "$StatusFile.tmp-$PID"
-  $payload | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $tmp -Encoding UTF8
+  Write-Utf8NoBom $tmp ($payload | ConvertTo-Json -Depth 12)
   Move-Item -Force -LiteralPath $tmp -Destination $StatusFile
 }
 function Convert-ToArgumentString([string[]]$Args) {

@@ -1,7 +1,7 @@
 {
-  "name": "fb-group-monitor-skill-v6-5-4",
-  "version": "6.5.4",
-  "description": "Two-stage Facebook game-group monitor with DeepSeek-compatible API-first semantic region adjudication, verified Codex CLI fallback, deterministic rules, GeoNames verification, durable checkpoints, scheduled recovery, and prompt-driven shutdown.",
+  "name": "fb-group-monitor-skill-v6-6-0",
+  "version": "6.6.0",
+  "description": "Two-stage Facebook game-group monitor with BOM-safe JSON inputs, verified phase-2 startup health, retryable task handoff, API-first semantic region adjudication, durable checkpoints, scheduled recovery, and prompt-driven shutdown.",
   "private": true,
   "scripts": {
     "login": "powershell -ExecutionPolicy Bypass -File .\\scripts\\open_chrome_9222.ps1",
@@ -21,7 +21,9 @@
     "semantic:install-codex-cli": "powershell -ExecutionPolicy Bypass -File .\\scripts\\install_official_codex_cli.ps1 -Method OfficialInstaller",
     "semantic:install-codex-cli:npm": "powershell -ExecutionPolicy Bypass -File .\\scripts\\install_official_codex_cli.ps1 -Method Npm",
     "semantic:verify-api": "node .\\scripts\\diagnose_semantic_provider_chain.js --api-only",
-    "semantic:verify-chain": "node .\\scripts\\diagnose_semantic_provider_chain.js"
+    "semantic:verify-chain": "node .\\scripts\\diagnose_semantic_provider_chain.js",
+    "phase2:validate": "node .\\scripts\\validate_phase2_inputs.js",
+    "phase2:handoff": "powershell -ExecutionPolicy Bypass -File .\\scripts\\queue_phase2_after_current.ps1"
   },
   "dependencies": {
     "playwright": "^1.59.1",
