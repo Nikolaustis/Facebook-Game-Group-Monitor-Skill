@@ -46,7 +46,7 @@ function assertObject(value, label) {
   const outReport = path.resolve(args['out-report'] || path.join(path.dirname(indexFile || process.cwd()), 'phase2_input_validation.json'));
   const report = {
     validation_kind: 'facebook_group_monitor_phase2_inputs',
-    version: '6.6.0',
+    version: '6.6.1',
     checked_at: new Date().toISOString(),
     ok: false,
     files: {},

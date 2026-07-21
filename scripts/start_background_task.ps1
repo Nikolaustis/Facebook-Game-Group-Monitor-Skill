@@ -384,7 +384,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
       $arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Bootstrap`""
       $action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument $arguments -WorkingDirectory $RootDir
     }
-    Register-ScheduledTask -TaskName $ScheduledTaskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description "Facebook Group Monitor V6.6.0 phase 2; verified startup; reboot-resumable; self-deletes after execution." -Force | Out-Null
+    Register-ScheduledTask -TaskName $ScheduledTaskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description "Facebook Group Monitor V6.6.1 phase 2; verified startup; reboot-resumable; self-deletes after execution." -Force | Out-Null
     Start-ScheduledTask -TaskName $ScheduledTaskName
   }
 

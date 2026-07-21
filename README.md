@@ -1,95 +1,86 @@
-# Facebook Group Monitor Skill V6.6.0
+# Facebook Group Monitor Skill V6.6.1
 
-V6.6.0 is a cumulative Windows-oriented Facebook game-group monitoring package. It preserves the uploaded base package workbook field order and adds resilient JSON input handling, phase-2 input preflight, verified startup health, and a standard retryable handoff workflow for “run this second batch after the current Facebook task finishes”.
+V6.6.1 is a cumulative Windows-oriented Facebook game-group monitoring package. It preserves the uploaded workbook field order and all V6.6 reliability features while isolating Codex CLI discovery from the desktop application environment.
 
 ## Main workflow
 
 1. Phase 1 collects group candidates and source-query metadata.
-2. Phase 2 prefilters candidate names before opening About and discussion pages.
+2. Phase 2 validates all JSON inputs before launch and prefilters irrelevant group names before opening About or discussion pages.
 3. Target titles, aliases, controlled variants, sibling games, and IP-root-only matches are evaluated separately.
-4. Language and region use deterministic evidence first, then configured APIs, verified Codex CLI, local rules, and controlled GeoNames.
+4. Language and region use deterministic evidence first, then configured APIs, a verified standalone Codex CLI, local rules, and controlled GeoNames.
 5. A complete checkpoint is saved after every candidate.
-6. `detail` and `manual_review` use the workbook field order supplied in the uploaded base package.
-7. Chrome closes after verified finalization. Scheduled tasks delete themselves. Shutdown remains prompt-driven and defaults to disabled.
+6. `detail` and `manual_review` retain the workbook field order supplied in the uploaded base package.
+7. Phase-2 startup is considered successful only after a fresh readable progress checkpoint appears.
+8. Queued batches use the built-in retryable handoff workflow.
+9. Chrome closes after verified finalization. Scheduled tasks delete themselves. Shutdown remains prompt-driven and defaults to disabled.
 
-## V6.6.0 reliability changes
+## V6.6.1 Codex CLI environment isolation
 
-### BOM-safe JSON inputs
-
-Core JSON readers now accept:
-
-- UTF-8 without BOM;
-- UTF-8 with BOM;
-- UTF-16 LE/BE with BOM;
-- strongly detected UTF-16 LE input without BOM.
-
-This applies to phase-1 configuration, phase-2 index/config/candidate files, shutdown policy, checkpoints, semantic configuration, and login-state configuration.
-
-### Input validation before launch
-
-Before phase 2 opens Chrome or registers a long-running task, it validates:
-
-- `phase1_index.json`;
-- task configuration;
-- shutdown policy;
-- every referenced candidate JSON file;
-- game names and candidate-array structure.
-
-The report is written to:
+The Skill no longer reads or relies on the global environment variable:
 
 ```text
-<RunDir>/phase2_input_validation.json
+CODEX_CLI_PATH
 ```
 
-Manual validation command:
+That name may also be interpreted by the Codex/ChatGPT desktop application. A user-level value pointing to an npm `.cmd` shim can interfere with desktop startup. V6.6.1 therefore:
+
+- ignores `CODEX_CLI_PATH` even when it exists;
+- removes it from every child-process environment created by the semantic resolver;
+- never recommends creating it;
+- records only a boolean warning in diagnostics, never its value;
+- uses the following safe discovery order:
+
+```text
+semantic_region_resolver.codex_exec.command when it is an explicit path
+→ FB_MONITOR_CODEX_CLI_PATH (Skill-private optional override)
+→ PATH / where.exe / Get-Command
+→ npm global installation paths
+→ other standalone CLI paths
+```
+
+The preferred configuration is simply:
+
+```json
+{
+  "semantic_region_resolver": {
+    "codex_exec": {
+      "command": "codex"
+    }
+  }
+}
+```
+
+When a direct path is necessary, place it in the private local configuration instead of a global environment variable:
+
+```json
+{
+  "semantic_region_resolver": {
+    "codex_exec": {
+      "command": "C:\\Users\\Og\\AppData\\Roaming\\npm\\codex.cmd"
+    }
+  }
+}
+```
+
+An optional Skill-specific override is also supported:
 
 ```powershell
-node .\scripts\validate_phase2_inputs.js `
-  --index ".\runs\example\phase1_index.json" `
-  --config ".\runs\example\task_config.json"
+$env:FB_MONITOR_CODEX_CLI_PATH = "$env:APPDATA\npm\codex.cmd"
 ```
 
-### Verified phase-2 startup
+No override is normally required because npm and PATH discovery are built in.
 
-The scheduled runner no longer reports success merely because PowerShell or Node obtained a PID. A supervisor starts phase 2 and waits until `phase2_progress.json` is newly written or updated and can be parsed. Only then is:
+### Remove the legacy variable
 
-```text
-startup_verified = true
-status = phase2_running
-```
-
-written to `scheduled_phase2_runner_status.json`.
-
-Immediate startup failures retain the child exit code and stderr tail instead of silently stopping.
-
-### Standard handoff instead of ad hoc scripts
-
-When the user asks Codex to run a second phase-2 batch after the current Facebook task, Codex should use:
+Explicit cleanup command:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\queue_phase2_after_current.ps1 `
-  -CurrentRunDir ".\runs\current_task" `
-  -Index ".\runs\next_task\phase1_index.json" `
-  -RunDir ".\runs\next_task" `
-  -Config ".\runs\next_task\task_config.json"
+npm run semantic:clear-legacy-codex-env
 ```
 
-The handoff script:
+This clears the current process and User-level `CODEX_CLI_PATH`. Machine-level cleanup is available only when explicitly running the script with `-IncludeMachine` in an elevated PowerShell.
 
-- waits for a verified current-task completion file;
-- validates the target inputs;
-- starts phase 2 through the normal V6.6.0 scheduler chain;
-- verifies actual progress startup;
-- records explicit failure details;
-- retries launch failures according to `-MaxStartAttempts`, `-RetryIntervalSeconds`, and optional `-RetryUntil`.
-
-Status is written to:
-
-```text
-<RunDir>/phase2_handoff_status.json
-```
-
-Codex must not recreate temporary JSON through `Set-Content -Encoding UTF8` or build one-off wait scripts when this built-in handoff applies.
+After changing persistent environment variables, restart the Codex/ChatGPT desktop application.
 
 ## Semantic provider order
 
@@ -108,10 +99,36 @@ npm run semantic:diagnose
 npm run semantic:verify-codex
 ```
 
-Private provider settings remain outside this package in:
+The Codex diagnostic now reports:
 
 ```text
-config/local/semantic_model.local.json
+legacy_global_codex_cli_path_detected
+legacy_global_codex_cli_path_ignored
+private_skill_override_detected
+child_processes_strip_legacy_global_override
+```
+
+It never writes the environment-variable value.
+
+## JSON, startup, and handoff reliability
+
+Core JSON readers accept UTF-8 with or without BOM and UTF-16 input. Phase 2 validates the index, config, shutdown policy, and every candidate file before launch. A PID alone is not considered a successful start: `phase2_progress.json` must be newly written or updated and readable.
+
+For “run this batch after the current Facebook task”, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\queue_phase2_after_current.ps1 `
+  -CurrentRunDir ".
+uns\current_task" `
+  -Index ".
+uns
+ext_task\phase1_index.json" `
+  -RunDir ".
+uns
+ext_task" `
+  -Config ".
+uns
+ext_task	ask_config.json"
 ```
 
 ## Shutdown behavior

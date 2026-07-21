@@ -115,6 +115,29 @@ function maskSecret(value) {
   return `${text.slice(0, 3)}***${text.slice(-3)}`;
 }
 
+const LEGACY_GLOBAL_CODEX_ENV = 'CODEX_CLI_PATH';
+const PRIVATE_SKILL_CODEX_ENV = 'FB_MONITOR_CODEX_CLI_PATH';
+
+function getEnvironmentVariableCaseInsensitive(name) {
+  const target = String(name || '').toUpperCase();
+  for (const [key, value] of Object.entries(process.env)) {
+    if (String(key).toUpperCase() === target) return value;
+  }
+  return undefined;
+}
+
+function hasEnvironmentVariableCaseInsensitive(name) {
+  return getEnvironmentVariableCaseInsensitive(name) !== undefined;
+}
+
+function childEnvironmentWithoutLegacyCodexOverride() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (String(key).toUpperCase() === LEGACY_GLOBAL_CODEX_ENV) delete env[key];
+  }
+  return env;
+}
+
 class SemanticRegionCache {
   constructor(file) {
     this.file = file;
@@ -139,7 +162,10 @@ class SemanticRegionCache {
 function expandEnvironmentVariables(value) {
   const text = clean(value);
   if (!text || process.platform !== 'win32') return text;
-  return text.replace(/%([^%]+)%/g, (_match, name) => process.env[name] || process.env[String(name).toUpperCase()] || _match);
+  return text.replace(/%([^%]+)%/g, (_match, name) => {
+    if (String(name).toUpperCase() === LEGACY_GLOBAL_CODEX_ENV) return _match;
+    return getEnvironmentVariableCaseInsensitive(name) || _match;
+  });
 }
 
 function uniqueValues(values) {
@@ -222,7 +248,7 @@ function runDiscoveryCommand(command, args, timeout = 8000) {
       windowsHide: true,
       timeout,
       shell: false,
-      env: { ...process.env },
+      env: childEnvironmentWithoutLegacyCodexOverride(),
     });
     return {
       ok: result.status === 0,
@@ -246,7 +272,10 @@ function discoverCodexCandidates(command, baseDir) {
 
   const explicitLooksLikePath = path.isAbsolute(expandEnvironmentVariables(requested)) || /[\\/]/.test(requested);
   if (explicitLooksLikePath) add(resolveConfigPathMaybe(expandEnvironmentVariables(requested), baseDir), 'configured_path');
-  if (process.env.CODEX_CLI_PATH) add(resolveConfigPathMaybe(expandEnvironmentVariables(process.env.CODEX_CLI_PATH), baseDir), 'env_CODEX_CLI_PATH');
+  const privateCodexCliPath = getEnvironmentVariableCaseInsensitive(PRIVATE_SKILL_CODEX_ENV);
+  if (privateCodexCliPath) {
+    add(resolveConfigPathMaybe(expandEnvironmentVariables(privateCodexCliPath), baseDir), 'env_FB_MONITOR_CODEX_CLI_PATH');
+  }
 
   if (process.platform === 'win32') {
     for (const name of uniqueValues([requested, 'codex.exe', 'codex.cmd', 'codex.ps1'])) {
@@ -338,7 +367,7 @@ function buildCandidateLaunch(candidate, args) {
 }
 
 function normalizeProviderOrder(_raw) {
-  // V6.6.0 uses one fixed policy. Legacy task files cannot restore Codex-first
+  // V6.6.1 uses one fixed policy. Legacy task files cannot restore Codex-first
   // ordering or omit the API stage. Availability is controlled by each provider's
   // enabled/configured state, not by changing the chain.
   return ['custom_api', 'codex_exec', 'rules_only'];
@@ -465,7 +494,7 @@ function mergeSemanticRegionResolverConfig(config, configFile, outDir) {
       status: merged.codex_exec.available ? 'candidate_detected_pending_preflight' : 'no_background_safe_cli_candidate',
       usable_candidate_count: merged.codex_exec.usable_candidates.length,
       windowsapps_alias_rejected: merged.codex_exec.candidates.some((item) => item.rejection_reason === 'windowsapps_app_execution_alias_not_background_safe'),
-      note: 'The current Codex desktop conversation is not callable by the background collector. A standalone background-safe Codex CLI executable must pass version, login, and schema-output checks.',
+      note: 'The current Codex desktop conversation is not callable by the background collector. A standalone background-safe Codex CLI must pass version, login, and schema-output checks. The legacy global CODEX_CLI_PATH variable is ignored and stripped from child processes because it can interfere with the desktop app; use PATH, codex_exec.command, or FB_MONITOR_CODEX_CLI_PATH instead.',
     },
   });
 
@@ -496,11 +525,11 @@ function mergeSemanticRegionResolverConfig(config, configFile, outDir) {
   merged.fail_closed_on_low_confidence = boolLike(merged.fail_closed_on_low_confidence, true);
   merged.fail_closed_on_error = boolLike(merged.fail_closed_on_error, true);
   merged.allow_model_explicit_region_lock = boolLike(merged.allow_model_explicit_region_lock, true);
-  // V6.6.0 fixed policy: any low-confidence API result must continue to the
+  // V6.6.1 fixed policy: any low-confidence API result must continue to the
   // next provider and ultimately Codex. Legacy/private local files that still
   // contain false are intentionally overridden at runtime.
   merged.fallback_on_low_confidence = true;
-  merged.fallback_on_low_confidence_source = 'v6.6.0_forced_api_to_codex_fallback';
+  merged.fallback_on_low_confidence_source = 'v6.6.1_forced_api_to_codex_fallback';
   merged.cache_file = resolveConfigPathMaybe(
     merged.cache_file || path.join(outDir || process.cwd(), 'semantic_region_cache.json'),
     baseDir,
@@ -881,7 +910,7 @@ function spawnCapture(command, args, { cwd, input, timeoutMs, maxOutputBytes = 2
         shell: Boolean(shell),
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env },
+        env: childEnvironmentWithoutLegacyCodexOverride(),
       });
     } catch (err) {
       resolve({ ok: false, status: 'spawn_error', reason: err.message || String(err) });
@@ -959,9 +988,16 @@ function persistCodexDiagnostic(config, payload) {
     if (!config?.diagnostic_file) return;
     writeJsonAtomic(config.diagnostic_file, {
       diagnostic_kind: 'facebook_group_monitor_codex_exec',
-      version: '6.6.0',
+      version: '6.6.1',
       updated_at: new Date().toISOString(),
       requested_command: config.command,
+      environment_safety: {
+        legacy_global_codex_cli_path_detected: hasEnvironmentVariableCaseInsensitive(LEGACY_GLOBAL_CODEX_ENV),
+        legacy_global_codex_cli_path_ignored: true,
+        private_skill_override_name: PRIVATE_SKILL_CODEX_ENV,
+        private_skill_override_detected: hasEnvironmentVariableCaseInsensitive(PRIVATE_SKILL_CODEX_ENV),
+        child_processes_strip_legacy_global_override: true,
+      },
       candidates: (config.candidates || []).map(safeCodexCandidateForDiagnostic),
       selected_candidate: safeCodexCandidateForDiagnostic(config.selected_candidate),
       ...payload,
@@ -1062,7 +1098,7 @@ async function ensureCodexPreflight(config, stats) {
     ok: false,
     status: accessDenied ? 'codex_cli_access_denied' : 'codex_cli_preflight_failed',
     reason: accessDenied
-      ? 'All discovered Codex CLI candidates failed to start with Access is denied. Install the official standalone CLI or configure CODEX_CLI_PATH to a background-safe executable.'
+      ? 'All discovered Codex CLI candidates failed to start with Access is denied. Keep the standalone CLI on PATH, set semantic_region_resolver.codex_exec.command in the Skill local config, or use FB_MONITOR_CODEX_CLI_PATH for this Skill only. Do not set the global CODEX_CLI_PATH variable.'
       : 'No discovered Codex CLI candidate passed version and login checks.',
     attempts,
   };
@@ -1247,7 +1283,7 @@ function providerFingerprint(config) {
 
 function cacheKey(config, context) {
   const value = JSON.stringify({
-    v: 'semantic-region-v6.6.0-api-first-deepseek-compatible',
+    v: 'semantic-region-v6.6.1-api-first-deepseek-compatible',
     providers: providerFingerprint(config),
     group_name: clean(context.groupName),
     residual_group_name: clean(context.residualGroupName),
@@ -1256,7 +1292,7 @@ function cacheKey(config, context) {
     risk_terms: context.riskTerms || [],
     safe_queries: context.safeQueries || [],
   });
-  return `semantic-region-v6.6.0-api-first-deepseek-compatible|${crypto.createHash('sha256').update(value).digest('hex')}`;
+  return `semantic-region-v6.6.1-api-first-deepseek-compatible|${crypto.createHash('sha256').update(value).digest('hex')}`;
 }
 
 function recordDecisionStats(out, stats) {

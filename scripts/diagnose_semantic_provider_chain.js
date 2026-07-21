@@ -91,7 +91,7 @@ function writeJsonAtomic(file, value) {
 
   const report = {
     diagnostic_kind: 'facebook_group_monitor_semantic_provider_chain',
-    version: '6.6.0',
+    version: '6.6.1',
     checked_at: new Date().toISOString(),
     mode: apiOnly ? 'api_only' : 'full_chain',
     provider_order: config.provider_order,
