@@ -28,7 +28,7 @@
 - [ ] 完整标题、紧凑标题和受控变体分别审计。
 - [ ] 兄弟标题排斥优先于弱命中。
 - [ ] IP root-only 和 full-text-only 未混入 `detail`。
-- [ ] 同一 URL 的跨游戏归属完成竞争裁决。
+- [ ] 同一 URL 明确命中多个游戏时，各游戏均保留；同一 URL、同一游戏仅保留最高分记录。
 
 ## 语言与地区
 
@@ -70,3 +70,12 @@
 - [ ] 目标输入预检通过。
 - [ ] 接力启动经过实际进度健康检查。
 - [ ] 启动失败按配置重试并写入 `phase2_handoff_status.json`。
+
+## V6.6.2 关键检查
+
+- [ ] 同一 URL 同时明确命中多个目标游戏时，每个游戏均保留一条 detail。
+- [ ] 同一 URL、同一游戏的重复行只保留最高分记录。
+- [ ] `collision_report.json` 使用 `keep_each_matched_game` 或 `deduplicate_same_game_keep_highest_score`。
+- [ ] 关机前生成 `shutdown_preflight_verification.json`。
+- [ ] 大型 checkpoint 的 `checkpoint_readable` 与 `checkpoint_finalized` 由 Node verifier 给出。
+- [ ] verifier 失败时记录 read_errors/stdout/stderr，且不得关机。

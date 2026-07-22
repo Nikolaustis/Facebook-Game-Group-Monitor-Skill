@@ -1,6 +1,6 @@
-# Facebook Group Monitor Skill V6.6.1
+# Facebook Group Monitor Skill V6.6.2
 
-V6.6.1 is a cumulative Windows-oriented Facebook game-group monitoring package. It preserves the uploaded workbook field order and all V6.6 reliability features while isolating Codex CLI discovery from the desktop application environment.
+V6.6.2 is a cumulative Windows-oriented Facebook game-group monitoring package. It preserves the uploaded XLSX field order and adds two reliability corrections: legitimate multi-game groups are retained once for every matched target game, and shutdown finalization is verified by Node.js rather than Windows PowerShell 5.1 parsing the full autosave checkpoint.
 
 ## Main workflow
 
@@ -14,127 +14,92 @@ V6.6.1 is a cumulative Windows-oriented Facebook game-group monitoring package. 
 8. Queued batches use the built-in retryable handoff workflow.
 9. Chrome closes after verified finalization. Scheduled tasks delete themselves. Shutdown remains prompt-driven and defaults to disabled.
 
-## V6.6.1 Codex CLI environment isolation
+## Multi-game group output
 
-The Skill no longer reads or relies on the global environment variable:
-
-```text
-CODEX_CLI_PATH
-```
-
-That name may also be interpreted by the Codex/ChatGPT desktop application. A user-level value pointing to an npm `.cmd` shim can interfere with desktop startup. V6.6.1 therefore:
-
-- ignores `CODEX_CLI_PATH` even when it exists;
-- removes it from every child-process environment created by the semantic resolver;
-- never recommends creating it;
-- records only a boolean warning in diagnostics, never its value;
-- uses the following safe discovery order:
+A Facebook group can legitimately cover several target games. V6.6.2 uses this final-output uniqueness key:
 
 ```text
-semantic_region_resolver.codex_exec.command when it is an explicit path
-→ FB_MONITOR_CODEX_CLI_PATH (Skill-private optional override)
-→ PATH / where.exe / Get-Command
-→ npm global installation paths
-→ other standalone CLI paths
+group_url + game_name
 ```
 
-The preferred configuration is simply:
+Therefore a group such as:
 
-```json
-{
-  "semantic_region_resolver": {
-    "codex_exec": {
-      "command": "codex"
-    }
-  }
-}
+```text
+ANIME VANGUARDS / ANIME LAST STAND (BUY / SELL / TRADE)
 ```
 
-When a direct path is necessary, place it in the private local configuration instead of a global environment variable:
+is retained twice when both title matches are valid:
 
-```json
-{
-  "semantic_region_resolver": {
-    "codex_exec": {
-      "command": "C:\\Users\\Og\\AppData\\Roaming\\npm\\codex.cmd"
-    }
-  }
-}
+```text
+same group_url + Anime Vanguards
+same group_url + Anime Last Stand
 ```
 
-An optional Skill-specific override is also supported:
+Only duplicate rows for the same URL and the same target game are collapsed to the highest-scoring match. `collision_report.json` records:
+
+```text
+keep_each_matched_game
+deduplicate_same_game_keep_highest_score
+```
+
+New audit statistics:
+
+```text
+multi_game_groups_preserved
+multi_game_rows_preserved
+same_game_duplicate_rows_dropped
+```
+
+## Large-checkpoint-safe shutdown verification
+
+The full `phase2_autosave_state.json` can exceed 2 MB. Windows PowerShell 5.1 `ConvertFrom-Json` may fail on such files, even though Node.js wrote and verified them correctly.
+
+V6.6.2 adds:
+
+```text
+scripts/verify_shutdown_state.js
+```
+
+The shutdown coordinator now asks Node.js to read and validate:
+
+- final XLSX, summary, collision, audit, and debug rows;
+- `phase2_autosave_state.json`;
+- `phase2_progress.json`;
+- `codex_task_complete.json`;
+- `shutdown_policy.json`.
+
+Node writes a small report:
+
+```text
+<RunDir>/shutdown_preflight_verification.json
+```
+
+PowerShell reads only this small report before issuing `shutdown.exe`. JSON parse failures are recorded instead of being silently converted to `checkpoint_finalized=false`.
+
+Manual verification command:
 
 ```powershell
-$env:FB_MONITOR_CODEX_CLI_PATH = "$env:APPDATA\npm\codex.cmd"
+npm run phase2:verify-shutdown -- --run-dir ".\runs\your_run"
 ```
-
-No override is normally required because npm and PATH discovery are built in.
-
-### Remove the legacy variable
-
-Explicit cleanup command:
-
-```powershell
-npm run semantic:clear-legacy-codex-env
-```
-
-This clears the current process and User-level `CODEX_CLI_PATH`. Machine-level cleanup is available only when explicitly running the script with `-IncludeMachine` in an elevated PowerShell.
-
-After changing persistent environment variables, restart the Codex/ChatGPT desktop application.
 
 ## Semantic provider order
 
 ```text
-configured custom APIs, in file order
-→ verified standalone Codex CLI (`codex exec`)
-→ deterministic local rules and controlled GeoNames
+configured custom APIs
+→ verified standalone Codex CLI
+→ local rules and controlled GeoNames
 ```
 
-Useful checks:
+The Skill ignores the global `CODEX_CLI_PATH` variable and removes it from semantic child-process environments. Prefer `codex_exec.command`, ordinary PATH/npm discovery, or the optional Skill-private `FB_MONITOR_CODEX_CLI_PATH` override.
 
-```powershell
-npm run semantic:verify-api
-npm run semantic:verify-chain
-npm run semantic:diagnose
-npm run semantic:verify-codex
-```
+## Installation
 
-The Codex diagnostic now reports:
+Extract this overlay into the existing Skill root and replace matching files. Do not replace or delete:
 
 ```text
-legacy_global_codex_cli_path_detected
-legacy_global_codex_cli_path_ignored
-private_skill_override_detected
-child_processes_strip_legacy_global_override
+runs/
+config/
+node_modules/
 ```
-
-It never writes the environment-variable value.
-
-## JSON, startup, and handoff reliability
-
-Core JSON readers accept UTF-8 with or without BOM and UTF-16 input. Phase 2 validates the index, config, shutdown policy, and every candidate file before launch. A PID alone is not considered a successful start: `phase2_progress.json` must be newly written or updated and readable.
-
-For “run this batch after the current Facebook task”, use:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\queue_phase2_after_current.ps1 `
-  -CurrentRunDir ".
-uns\current_task" `
-  -Index ".
-uns
-ext_task\phase1_index.json" `
-  -RunDir ".
-uns
-ext_task" `
-  -Config ".
-uns
-ext_task	ask_config.json"
-```
-
-## Shutdown behavior
-
-Default: do not shut down.
-
-Codex converts the user’s current natural-language instruction into the run-specific `shutdown_policy.json`. Shutdown is permitted only after final workbook/report generation, finalized checkpoints, completion verification, Chrome closure, and deadline validation all succeed.
 
 No new npm dependency is required.

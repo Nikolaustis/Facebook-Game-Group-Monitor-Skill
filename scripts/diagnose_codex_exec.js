@@ -31,7 +31,7 @@ async function main() {
   const preflight = await ensureCodexPreflight(config.codex_exec, stats);
   const report = {
     diagnostic_kind: 'facebook_group_monitor_codex_exec_manual_check',
-    version: '6.6.1',
+    version: '6.6.2',
     checked_at: new Date().toISOString(),
     preflight,
     stats,

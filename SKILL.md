@@ -1,10 +1,10 @@
 ---
 name: facebook-group-monitor
-version: 6.6.1
-description: Two-stage Facebook game-group monitoring with isolated Codex CLI discovery, API-first semantic region adjudication, BOM-safe inputs, verified phase-2 startup, durable recovery, retryable handoff, and prompt-driven shutdown.
+version: 6.6.2
+description: Two-stage Facebook game-group monitoring with multi-game group preservation, Node-verified shutdown finalization, isolated Codex CLI discovery, API-first semantic region adjudication, BOM-safe inputs, verified startup, durable recovery, retryable handoff, and prompt-driven shutdown.
 ---
 
-# Facebook Group Monitor V6.6.1
+# Facebook Group Monitor V6.6.2
 
 ## Operating sequence
 
@@ -26,6 +26,43 @@ custom APIs in configured order
 9. Close Chrome after successful finalization and delete completed scheduled tasks.
 10. Default to no shutdown. Generate the run-specific shutdown policy only from the user’s current instruction.
 
+## Mandatory multi-game output rule
+
+Do not force one Facebook URL to belong to only one game. The authoritative uniqueness key is:
+
+```text
+group_url + game_name
+```
+
+When one group clearly matches several target games, preserve one final `detail` row for each matched game. Do not use `drop_all_tied` for cross-game equal scores.
+
+Only duplicate records that share both the same normalized `group_url` and the same `game_name` may be collapsed. Keep the highest-scoring same-game record and record the discarded duplicates in `collision_report.json`.
+
+Expected collision resolutions:
+
+```text
+keep_each_matched_game
+deduplicate_same_game_keep_highest_score
+```
+
+## Mandatory shutdown verification rule
+
+Do not parse the full `phase2_autosave_state.json` with Windows PowerShell 5.1 `ConvertFrom-Json` as the authoritative shutdown check. Large checkpoints can exceed PowerShell’s reliable JSON parsing range.
+
+Use:
+
+```text
+scripts/verify_shutdown_state.js
+```
+
+The Node verifier must read the large checkpoint, progress, completion, policy, and final outputs, then write:
+
+```text
+<RunDir>/shutdown_preflight_verification.json
+```
+
+The runner coordinator and direct watcher may issue shutdown only when the small verification report has `all_valid=true` and the current deadline policy permits shutdown. Any JSON read failure must be recorded in `read_errors`; it must not be silently represented as a false finalization flag.
+
 ## Mandatory Codex CLI isolation
 
 Never create, set, recommend, or depend on the global environment variable:
@@ -33,8 +70,6 @@ Never create, set, recommend, or depend on the global environment variable:
 ```text
 CODEX_CLI_PATH
 ```
-
-V6.6.1 ignores that variable and removes it from semantic-resolver child processes. It may conflict with Codex/ChatGPT desktop startup when it points to a `.cmd` shim.
 
 Use this discovery order:
 
@@ -53,16 +88,6 @@ Prefer:
 }
 ```
 
-A direct path may be stored in `config/local/semantic_model.local.json`. Do not ask the user to create `CODEX_CLI_PATH` at User or Machine scope.
-
-When the legacy variable is detected, explain that it is ignored and advise the explicit cleanup command:
-
-```powershell
-npm run semantic:clear-legacy-codex-env
-```
-
-Do not run cleanup automatically without the user requesting it.
-
 ## Mandatory JSON handling
 
 Use `scripts/json_io.js` for JavaScript JSON reads. PowerShell-generated JSON must use UTF-8 without BOM through package helpers. Do not use ad hoc `Set-Content -Encoding UTF8` for phase indexes, task configurations, manifests, policies, or status JSON.
@@ -78,14 +103,3 @@ Use `scripts/queue_phase2_after_current.ps1` when the user asks to run another s
 ## XLSX output contract
 
 The workbook field order in this package is authoritative. `manual_review` begins with the same columns as `detail`; review-only fields follow afterward. New audit fields must be appended and must not reorder existing columns.
-
-## Provider verification
-
-```powershell
-npm run semantic:verify-api
-npm run semantic:verify-chain
-npm run semantic:diagnose
-npm run semantic:verify-codex
-```
-
-A valid low-confidence API response that correctly falls back is a successful transport/Schema verification, not an API failure.

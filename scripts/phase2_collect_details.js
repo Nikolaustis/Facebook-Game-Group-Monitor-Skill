@@ -3741,54 +3741,82 @@ function collisionRowSummary(r) {
 }
 
 function resolveCollisions(rows) {
+  // A Facebook group may legitimately cover several target games. The final
+  // workbook therefore uses (group_url, game_name) as its uniqueness key.
+  // Cross-game matches are preserved; only duplicate rows for the same URL and
+  // the same target game are collapsed to the strongest match.
   const byUrl = new Map();
+  const kept = [];
   for (const row of rows) {
-    if (!byUrl.has(row.group_url)) byUrl.set(row.group_url, []);
-    byUrl.get(row.group_url).push(row);
+    const groupUrl = clean(row.group_url || '');
+    if (!groupUrl) {
+      kept.push(row);
+      continue;
+    }
+    if (!byUrl.has(groupUrl)) byUrl.set(groupUrl, []);
+    byUrl.get(groupUrl).push(row);
   }
 
-  const kept = [];
   const report = [];
   let droppedCollision = 0;
+  let sameGameDuplicateRowsDropped = 0;
+  let multiGameGroupsPreserved = 0;
+  let multiGameRowsPreserved = 0;
 
   for (const [groupUrl, arr] of byUrl.entries()) {
-    if (arr.length === 1) {
-      kept.push(arr[0]);
-      continue;
+    const byGame = new Map();
+    arr.forEach((row, originalIndex) => {
+      const gameKey = clean(row.game_name || '') || '__UNKNOWN_GAME__';
+      if (!byGame.has(gameKey)) byGame.set(gameKey, []);
+      byGame.get(gameKey).push({ row, originalIndex });
+    });
+
+    const selectedRows = [];
+    const droppedSameGameRows = [];
+    for (const [gameKey, candidates] of byGame.entries()) {
+      const sorted = [...candidates].sort((a, b) => {
+        const scoreDiff = (Number(b.row.__match_score) || 0) - (Number(a.row.__match_score) || 0);
+        return scoreDiff || a.originalIndex - b.originalIndex;
+      });
+      selectedRows.push(sorted[0].row);
+      if (sorted.length > 1) {
+        const dropped = sorted.slice(1).map((item) => item.row);
+        droppedSameGameRows.push(...dropped);
+        droppedCollision += dropped.length;
+        sameGameDuplicateRowsDropped += dropped.length;
+      }
     }
 
-    const sorted = [...arr].sort((a, b) => (b.__match_score || 0) - (a.__match_score || 0));
-    const topScore = sorted[0].__match_score || 0;
-    const topRows = sorted.filter((r) => (r.__match_score || 0) === topScore);
-
-    if (topRows.length === 1) {
-      kept.push(topRows[0]);
-      droppedCollision += sorted.length - 1;
+    kept.push(...selectedRows);
+    if (selectedRows.length > 1) {
+      multiGameGroupsPreserved += 1;
+      multiGameRowsPreserved += selectedRows.length;
       report.push({
         group_url: groupUrl,
-        resolution: 'keep_highest_score',
-        kept_game_name: topRows[0].game_name,
-        kept_match_type: topRows[0].__match_type,
-        kept_match_score: topRows[0].__match_score,
-        kept_source_query: topRows[0].__source_query,
-        kept_query_variant_type: topRows[0].__query_variant_type,
-        dropped_games: sorted.slice(1).map(collisionRowSummary),
+        resolution: 'keep_each_matched_game',
+        uniqueness_key: 'group_url + game_name',
+        kept_games: selectedRows.map(collisionRowSummary),
+        dropped_same_game_duplicates: droppedSameGameRows.map(collisionRowSummary),
       });
-      continue;
+    } else if (droppedSameGameRows.length) {
+      report.push({
+        group_url: groupUrl,
+        resolution: 'deduplicate_same_game_keep_highest_score',
+        uniqueness_key: 'group_url + game_name',
+        kept_games: selectedRows.map(collisionRowSummary),
+        dropped_same_game_duplicates: droppedSameGameRows.map(collisionRowSummary),
+      });
     }
-
-    droppedCollision += sorted.length;
-    report.push({
-      group_url: groupUrl,
-      resolution: 'drop_all_tied',
-      kept_game_name: '',
-      kept_match_type: '',
-      kept_match_score: topScore,
-      dropped_games: sorted.map(collisionRowSummary),
-    });
   }
 
-  return { rows: kept, report, droppedCollision };
+  return {
+    rows: kept,
+    report,
+    droppedCollision,
+    sameGameDuplicateRowsDropped,
+    multiGameGroupsPreserved,
+    multiGameRowsPreserved,
+  };
 }
 
 (async () => {
@@ -4630,6 +4658,9 @@ function resolveCollisions(rows) {
     const resolved = resolveCollisions(stagedRows);
     writePartialCheckpoint({ stage: 'before_final_write' }, { writeFullState: true });
     stats.dropped_collision = resolved.droppedCollision;
+    stats.same_game_duplicate_rows_dropped = resolved.sameGameDuplicateRowsDropped;
+    stats.multi_game_groups_preserved = resolved.multiGameGroupsPreserved;
+    stats.multi_game_rows_preserved = resolved.multiGameRowsPreserved;
     stats.manual_review_rows = manualReviewRows.length;
 
     const outputSnapshotDate = normalizeSnapshotDate(snapshotDate || config.snapshot_date, new Date().toISOString().slice(0, 10));
@@ -4684,6 +4715,9 @@ function resolveCollisions(rows) {
       output_rows: finalRows.length,
       manual_review_rows: manualReviewRows.length,
       dropped_collision: resolved.droppedCollision,
+      same_game_duplicate_rows_dropped: resolved.sameGameDuplicateRowsDropped,
+      multi_game_groups_preserved: resolved.multiGameGroupsPreserved,
+      multi_game_rows_preserved: resolved.multiGameRowsPreserved,
     };
     writeJsonAtomic(outCheckpoint, finalCheckpoint);
     writeJsonAtomic(outProgress, {

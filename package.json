@@ -1,7 +1,7 @@
 {
-  "name": "fb-group-monitor-skill-v6-6-1",
-  "version": "6.6.1",
-  "description": "Two-stage Facebook game-group monitor with isolated Codex CLI discovery, API-first semantic adjudication, BOM-safe JSON inputs, verified phase-2 startup, retryable handoff, durable checkpoints, scheduled recovery, and prompt-driven shutdown.",
+  "name": "fb-group-monitor-skill-v6-6-2",
+  "version": "6.6.2",
+  "description": "Two-stage Facebook game-group monitor with multi-game group preservation, Node-verified shutdown finalization, isolated Codex CLI discovery, API-first semantic adjudication, BOM-safe inputs, verified startup, durable checkpoints, retryable handoff, and prompt-driven shutdown.",
   "private": true,
   "scripts": {
     "login": "powershell -ExecutionPolicy Bypass -File .\\scripts\\open_chrome_9222.ps1",
@@ -24,7 +24,8 @@
     "semantic:verify-chain": "node .\\scripts\\diagnose_semantic_provider_chain.js",
     "phase2:validate": "node .\\scripts\\validate_phase2_inputs.js",
     "phase2:handoff": "powershell -ExecutionPolicy Bypass -File .\\scripts\\queue_phase2_after_current.ps1",
-    "semantic:clear-legacy-codex-env": "powershell -ExecutionPolicy Bypass -File .\\scripts\\clear_legacy_codex_cli_path.ps1"
+    "semantic:clear-legacy-codex-env": "powershell -ExecutionPolicy Bypass -File .\\scripts\\clear_legacy_codex_cli_path.ps1",
+    "phase2:verify-shutdown": "node .\\scripts\\verify_shutdown_state.js"
   },
   "dependencies": {
     "playwright": "^1.59.1",

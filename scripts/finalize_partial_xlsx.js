@@ -76,56 +76,81 @@ function collisionRowSummary(r) {
 }
 
 function resolveCollisions(rows) {
+  // Recovery finalization follows the same contract as the live collector:
+  // preserve one row per (group_url, game_name), including legitimate
+  // multi-game groups, and collapse only same-game duplicates.
   const byUrl = new Map();
+  const kept = [];
   for (const row of rows) {
-    if (!row.group_url) continue;
-    if (!byUrl.has(row.group_url)) byUrl.set(row.group_url, []);
-    byUrl.get(row.group_url).push(row);
+    const groupUrl = String(row.group_url || '').trim();
+    if (!groupUrl) {
+      kept.push(row);
+      continue;
+    }
+    if (!byUrl.has(groupUrl)) byUrl.set(groupUrl, []);
+    byUrl.get(groupUrl).push(row);
   }
 
-  const kept = [];
   const report = [];
   let droppedCollision = 0;
-  const seenUrls = new Set(byUrl.keys());
-  for (const row of rows) {
-    if (!row.group_url || seenUrls.has(row.group_url)) continue;
-    kept.push(row);
-  }
+  let sameGameDuplicateRowsDropped = 0;
+  let multiGameGroupsPreserved = 0;
+  let multiGameRowsPreserved = 0;
 
   for (const [groupUrl, arr] of byUrl.entries()) {
-    if (arr.length === 1) {
-      kept.push(arr[0]);
-      continue;
+    const byGame = new Map();
+    arr.forEach((row, originalIndex) => {
+      const gameKey = String(row.game_name || '').trim() || '__UNKNOWN_GAME__';
+      if (!byGame.has(gameKey)) byGame.set(gameKey, []);
+      byGame.get(gameKey).push({ row, originalIndex });
+    });
+
+    const selectedRows = [];
+    const droppedSameGameRows = [];
+    for (const candidates of byGame.values()) {
+      const sorted = [...candidates].sort((a, b) => {
+        const scoreDiff = (Number(b.row.__match_score) || 0) - (Number(a.row.__match_score) || 0);
+        return scoreDiff || a.originalIndex - b.originalIndex;
+      });
+      selectedRows.push(sorted[0].row);
+      if (sorted.length > 1) {
+        const dropped = sorted.slice(1).map((item) => item.row);
+        droppedSameGameRows.push(...dropped);
+        droppedCollision += dropped.length;
+        sameGameDuplicateRowsDropped += dropped.length;
+      }
     }
-    const sorted = [...arr].sort((a, b) => (Number(b.__match_score) || 0) - (Number(a.__match_score) || 0));
-    const topScore = Number(sorted[0].__match_score) || 0;
-    const topRows = sorted.filter((r) => (Number(r.__match_score) || 0) === topScore);
-    if (topRows.length === 1) {
-      kept.push(topRows[0]);
-      droppedCollision += sorted.length - 1;
+
+    kept.push(...selectedRows);
+    if (selectedRows.length > 1) {
+      multiGameGroupsPreserved += 1;
+      multiGameRowsPreserved += selectedRows.length;
       report.push({
         group_url: groupUrl,
-        resolution: 'keep_highest_score',
-        kept_game_name: topRows[0].game_name,
-        kept_match_type: topRows[0].__match_type,
-        kept_match_score: topScore,
-        kept_source_query: topRows[0].__source_query,
-        kept_query_variant_type: topRows[0].__query_variant_type,
-        dropped_games: sorted.slice(1).map(collisionRowSummary),
+        resolution: 'keep_each_matched_game',
+        uniqueness_key: 'group_url + game_name',
+        kept_games: selectedRows.map(collisionRowSummary),
+        dropped_same_game_duplicates: droppedSameGameRows.map(collisionRowSummary),
       });
-      continue;
+    } else if (droppedSameGameRows.length) {
+      report.push({
+        group_url: groupUrl,
+        resolution: 'deduplicate_same_game_keep_highest_score',
+        uniqueness_key: 'group_url + game_name',
+        kept_games: selectedRows.map(collisionRowSummary),
+        dropped_same_game_duplicates: droppedSameGameRows.map(collisionRowSummary),
+      });
     }
-    droppedCollision += sorted.length;
-    report.push({
-      group_url: groupUrl,
-      resolution: 'drop_all_tied',
-      kept_game_name: '',
-      kept_match_type: '',
-      kept_match_score: topScore,
-      dropped_games: sorted.map(collisionRowSummary),
-    });
   }
-  return { rows: kept, report, droppedCollision };
+
+  return {
+    rows: kept,
+    report,
+    droppedCollision,
+    sameGameDuplicateRowsDropped,
+    multiGameGroupsPreserved,
+    multiGameRowsPreserved,
+  };
 }
 
 
@@ -273,6 +298,9 @@ let rawRows = [];
 let checkpoint = null;
 let collisionReport = [];
 let droppedCollision = 0;
+let sameGameDuplicateRowsDropped = 0;
+let multiGameGroupsPreserved = 0;
+let multiGameRowsPreserved = 0;
 if (fs.existsSync(checkpointSrc)) {
   checkpoint = readJsonFile(checkpointSrc);
   rawRows = Array.isArray(checkpoint.staged_rows) ? checkpoint.staged_rows : [];
@@ -282,6 +310,9 @@ if (fs.existsSync(checkpointSrc)) {
     rawRows = resolved.rows;
     collisionReport = resolved.report;
     droppedCollision = resolved.droppedCollision;
+    sameGameDuplicateRowsDropped = resolved.sameGameDuplicateRowsDropped;
+    multiGameGroupsPreserved = resolved.multiGameGroupsPreserved;
+    multiGameRowsPreserved = resolved.multiGameRowsPreserved;
   }
 }
 if (!rawRows.length && fs.existsSync(src)) {
@@ -370,10 +401,10 @@ const summary = {
     VN_avg_week_new_fans: average(vnRows, 'week_new_fans'),
   },
 };
-writeJsonAtomic(outSummary, { summary, recovery: { source: sourceKind, checkpoint: checkpointSrc, partial_xlsx: src, dropped_collision: droppedCollision } });
+writeJsonAtomic(outSummary, { summary, recovery: { source: sourceKind, checkpoint: checkpointSrc, partial_xlsx: src, dropped_collision: droppedCollision, same_game_duplicate_rows_dropped: sameGameDuplicateRowsDropped, multi_game_groups_preserved: multiGameGroupsPreserved, multi_game_rows_preserved: multiGameRowsPreserved } });
 if (sourceKind === 'phase2_autosave_state') {
   writeJsonAtomic(outCollision, collisionReport);
-  writeJsonAtomic(outAudit, { ...(checkpoint && checkpoint.stats ? checkpoint.stats : {}), recovered_from_checkpoint: true, dropped_collision: droppedCollision, output_rows: finalRows.length });
+  writeJsonAtomic(outAudit, { ...(checkpoint && checkpoint.stats ? checkpoint.stats : {}), recovered_from_checkpoint: true, dropped_collision: droppedCollision, same_game_duplicate_rows_dropped: sameGameDuplicateRowsDropped, multi_game_groups_preserved: multiGameGroupsPreserved, multi_game_rows_preserved: multiGameRowsPreserved, output_rows: finalRows.length });
 }
 
 const check = XLSX.readFile(outXlsx, { cellDates: false });
@@ -386,5 +417,5 @@ console.log(JSON.stringify({
   A2: sh.A2 && { v: sh.A2.v, t: sh.A2.t },
   G2: sh.G2 && { v: sh.G2.v, t: sh.G2.t },
   summary,
-  recovery: { source: sourceKind, checkpoint: checkpointSrc, partial_xlsx: src, dropped_collision: droppedCollision },
+  recovery: { source: sourceKind, checkpoint: checkpointSrc, partial_xlsx: src, dropped_collision: droppedCollision, same_game_duplicate_rows_dropped: sameGameDuplicateRowsDropped, multi_game_groups_preserved: multiGameGroupsPreserved, multi_game_rows_preserved: multiGameRowsPreserved },
 }, null, 2));

@@ -1,4 +1,4 @@
 interface:
-  display_name: Facebook Group Monitor V6.6.1
-  short_description: Facebook group monitoring with isolated Codex CLI discovery and verified queued execution.
-  default_prompt: 按 V6.6.1 流程运行 Facebook 群组监测。不得创建、读取或建议全局 CODEX_CLI_PATH；优先使用本地配置中的 codex_exec.command，其次使用 Skill 私有的 FB_MONITOR_CODEX_CLI_PATH，再通过 PATH、npm 和独立 CLI 路径自动发现。语义提供方顺序为自定义 API、已验证的 Codex CLI、本地规则与受控 GeoNames。第二轮启动前必须预解析所有输入，只有 phase2_progress.json 新增或更新且可读取后才汇报启动成功。接力任务使用 scripts/queue_phase2_after_current.ps1。每个候选后保存完整 checkpoint。默认完成后不关机；根据用户本次文本生成 shutdown_policy.json。正常完成后关闭 Chrome 并删除计划任务。
+  display_name: Facebook Group Monitor V6.6.2
+  short_description: Facebook group monitoring with multi-game preservation and Node-verified shutdown finalization.
+  default_prompt: 按 V6.6.2 流程运行 Facebook 群组监测。最终明细以 group_url + game_name 为唯一键；同一群组明确命中多个目标游戏时，必须分别保留到对应游戏，不得因跨游戏同分而全部删除。关机前必须调用 scripts/verify_shutdown_state.js 读取完整 checkpoint、progress、completion 和 policy，并仅依据生成的小型 shutdown_preflight_verification.json 进行严格校验；不得用 Windows PowerShell 5.1 ConvertFrom-Json 直接解析大型 phase2_autosave_state.json。语义提供方顺序为自定义 API、已验证的 Codex CLI、本地规则与受控 GeoNames。第二轮启动前预解析输入，只有 phase2_progress.json 新增或更新且可读取后才汇报启动成功。接力任务使用 scripts/queue_phase2_after_current.ps1。每个候选后保存完整 checkpoint。默认完成后不关机；根据用户本次文本生成 shutdown_policy.json。正常完成后关闭 Chrome 并删除计划任务。

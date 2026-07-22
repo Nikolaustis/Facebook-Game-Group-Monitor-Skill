@@ -17,6 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$script:JsonReadErrors = New-Object System.Collections.Generic.List[object]
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
   $dir = Split-Path -Parent $Path
@@ -25,7 +26,12 @@ function Write-Utf8NoBom([string]$Path, [string]$Text) {
 }
 
 function Read-JsonSafe([string]$Path) {
-  try { return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json } catch { return $null }
+  try {
+    return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+  } catch {
+    $script:JsonReadErrors.Add([ordered]@{ path=$Path; error=$_.Exception.ToString() }) | Out-Null
+    return $null
+  }
 }
 function Test-UsableFile([string]$Path, [int64]$MinimumBytes = 2) {
   try { return (Test-Path -LiteralPath $Path -PathType Leaf) -and ((Get-Item -LiteralPath $Path).Length -ge $MinimumBytes) } catch { return $false }
@@ -33,7 +39,7 @@ function Test-UsableFile([string]$Path, [int64]$MinimumBytes = 2) {
 function Write-Status([string]$Status, [hashtable]$Extra = @{}) {
   $payload = [ordered]@{
     watcher_kind = 'facebook_group_monitor_conditional_shutdown_watcher'
-    watcher_version = 4
+    watcher_version = 5
     watcher_pid = $PID
     watch_pid = $WatchPid
     status = $Status
@@ -154,6 +160,13 @@ exit `$LASTEXITCODE
   return [ordered]@{ ok=$false; method='all_methods_failed'; attempts=$attempts }
 }
 
+
+$RunDir = Split-Path -Parent ([System.IO.Path]::GetFullPath($Completion))
+$ShutdownVerifierScript = Join-Path $PSScriptRoot 'verify_shutdown_state.js'
+$ShutdownVerificationFile = Join-Path $RunDir 'shutdown_preflight_verification.json'
+$ShutdownVerificationStdout = Join-Path $RunDir 'shutdown_preflight_verification.stdout.log'
+$ShutdownVerificationStderr = Join-Path $RunDir 'shutdown_preflight_verification.stderr.log'
+
 try {
   Write-Status 'watching_phase2_process' @{ message='Waiting for phase 2 to exit. Shutdown remains blocked until strict finalization validation succeeds.' }
   while (Get-Process -Id $WatchPid -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 1 }
@@ -163,32 +176,41 @@ try {
   # before any immediate shutdown to prevent stale Task Scheduler entries.
   $mainTaskCleanup = Remove-ScheduledTaskRobust $ScheduledTaskName
 
-  $completionData = Read-JsonSafe $Completion
-  $checkpoint = Read-JsonSafe $OutCheckpoint
-  $progress = Read-JsonSafe $OutProgress
-  $checks = [ordered]@{
-    final_xlsx = Test-UsableFile $OutXlsx 1024
-    summary_json = Test-UsableFile $OutSummary 2
-    collision_json = Test-UsableFile $OutCollision 2
-    audit_json = Test-UsableFile $OutAudit 2
-    debug_rows_json = Test-UsableFile $OutDebugRows 2
-    checkpoint_finalized = [bool]($checkpoint -and $checkpoint.finalized -eq $true)
-    progress_finalized = [bool]($progress -and $progress.finalized -eq $true)
-    completion_verified = [bool]($completionData -and $completionData.phase2_finalization_verified -eq $true)
-    final_report_generated = [bool]($completionData -and $completionData.final_report_generated -eq $true)
-    report_created = [bool]($completionData -and $completionData.report_created -eq $true)
-    chrome_closed = [bool]($completionData -and $completionData.chrome_closed -eq $true)
-    watcher_token_matches = [bool]($completionData -and ([string]$completionData.shutdown_watcher_token -eq $Token))
+  $verifierExitCode = $null
+  if (-not (Test-Path -LiteralPath $ShutdownVerifierScript -PathType Leaf)) {
+    Write-Status 'shutdown_not_requested_verifier_missing' @{ verifier_script=$ShutdownVerifierScript; main_task_cleanup=$mainTaskCleanup }
+    exit 1
   }
-  $allValid = -not ($checks.Values -contains $false)
+  try {
+    & node $ShutdownVerifierScript --run-dir $RunDir --out $ShutdownVerificationFile --coordinator-mode watcher --watcher-token $Token --completion $Completion --checkpoint $OutCheckpoint --progress $OutProgress --final-xlsx $OutXlsx --summary $OutSummary --collision $OutCollision --audit $OutAudit --debug-rows $OutDebugRows 1>> $ShutdownVerificationStdout 2>> $ShutdownVerificationStderr
+    $verifierExitCode = $LASTEXITCODE
+  } catch {
+    $verifierExitCode = 1
+    Add-Content -LiteralPath $ShutdownVerificationStderr -Value $_.Exception.ToString()
+  }
+  $verification = Read-JsonSafe $ShutdownVerificationFile
+  $completionData = Read-JsonSafe $Completion
+  if (-not $verification) {
+    $stderrTail = ''
+    try { $stderrTail = (Get-Content -LiteralPath $ShutdownVerificationStderr -Tail 80 -ErrorAction SilentlyContinue) -join "`n" } catch {}
+    Write-Status 'shutdown_not_requested_verifier_failed' @{ verifier_exit_code=$verifierExitCode; verifier_file=$ShutdownVerificationFile; verifier_stderr=$stderrTail; json_read_errors=$script:JsonReadErrors; main_task_cleanup=$mainTaskCleanup }
+    exit 1
+  }
+  $checks = [ordered]@{}
+  if ($verification.checks) {
+    foreach ($property in $verification.checks.PSObject.Properties) {
+      $checks[$property.Name] = [bool]$property.Value
+    }
+  }
+  $allValid = [bool]$verification.all_valid
   if (-not $allValid) {
-    Write-Status 'shutdown_not_requested_validation_failed' @{ checks=$checks; main_task_cleanup=$mainTaskCleanup; completion_status=if($completionData){[string]$completionData.status}else{''} }
+    Write-Status 'shutdown_not_requested_validation_failed' @{ checks=$checks; main_task_cleanup=$mainTaskCleanup; completion_status=if($completionData){[string]$completionData.status}else{''}; verification_file=$ShutdownVerificationFile; verifier_exit_code=$verifierExitCode; read_errors=$verification.read_errors; json_read_errors=$script:JsonReadErrors }
     exit 1
   }
 
   if (-not [string]::IsNullOrWhiteSpace($ShutdownBefore)) {
     $deadline = [DateTimeOffset]::Parse($ShutdownBefore)
-    $completedText = if ($completionData.completed_at) { [string]$completionData.completed_at } else { [string]$completionData.updated_at }
+    $completedText = if ($verification.completed_at) { [string]$verification.completed_at } elseif ($completionData.completed_at) { [string]$completionData.completed_at } else { [string]$completionData.updated_at }
     $completedAt = [DateTimeOffset]::Parse($completedText)
     if ($completedAt -ge $deadline) {
       Write-Status 'complete_after_deadline_no_shutdown' @{ checks=$checks; main_task_cleanup=$mainTaskCleanup; completed_at=$completedAt.ToString('o'); deadline=$deadline.ToString('o') }
@@ -196,7 +218,7 @@ try {
     }
   }
 
-  Write-Status 'issuing_forced_shutdown' @{ checks=$checks; main_task_cleanup=$mainTaskCleanup; completed_at=[string]$completionData.completed_at }
+  Write-Status 'issuing_forced_shutdown' @{ checks=$checks; main_task_cleanup=$mainTaskCleanup; completed_at=[string]$completionData.completed_at; verification_file=$ShutdownVerificationFile; verifier_exit_code=$verifierExitCode }
   $result = Invoke-ForcedShutdown
   Write-Status $(if($result.ok){'forced_shutdown_scheduled'}else{'forced_shutdown_not_scheduled'}) @{ checks=$checks; main_task_cleanup=$mainTaskCleanup; shutdown=$result; completed_at=[string]$completionData.completed_at }
   if (-not $result.ok) { exit 1 }
