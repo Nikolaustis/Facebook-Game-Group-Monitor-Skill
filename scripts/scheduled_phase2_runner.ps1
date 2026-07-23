@@ -148,6 +148,14 @@ $StatusFile = Join-Path $RunDir 'background_task.json'
 $RunnerStatus = Join-Path $RunDir 'scheduled_phase2_runner_status.json'
 $StdoutLog = [string]$m.stdout_log
 $StderrLog = [string]$m.stderr_log
+$SupervisorStdoutLog = if ([string]::IsNullOrWhiteSpace([string]$m.supervisor_stdout_log)) { Join-Path $RunDir 'phase2_supervisor.stdout.log' } else { [string]$m.supervisor_stdout_log }
+$SupervisorStderrLog = if ([string]::IsNullOrWhiteSpace([string]$m.supervisor_stderr_log)) { Join-Path $RunDir 'phase2_supervisor.stderr.log' } else { [string]$m.supervisor_stderr_log }
+if ([System.StringComparer]::OrdinalIgnoreCase.Equals([System.IO.Path]::GetFullPath($SupervisorStdoutLog), [System.IO.Path]::GetFullPath($StdoutLog))) {
+  $SupervisorStdoutLog = Join-Path $RunDir 'phase2_supervisor.stdout.log'
+}
+if ([System.StringComparer]::OrdinalIgnoreCase.Equals([System.IO.Path]::GetFullPath($SupervisorStderrLog), [System.IO.Path]::GetFullPath($StderrLog))) {
+  $SupervisorStderrLog = Join-Path $RunDir 'phase2_supervisor.stderr.log'
+}
 $BootstrapPath = [string]$m.bootstrap_script
 $LauncherMode = if ([string]::IsNullOrWhiteSpace([string]$m.launcher_mode)) { 'legacy_task_scheduler' } else { [string]$m.launcher_mode }
 $lockName = 'Local\FBGroupMonitor_' + (($TaskName -replace '[^A-Za-z0-9_]', '_'))
@@ -218,6 +226,10 @@ try {
     scheduled_task_deleted = $false
     launcher = $LauncherMode
     powershell_window_visible = $false
+    stdout_log = $StdoutLog
+    stderr_log = $StderrLog
+    supervisor_stdout_log = $SupervisorStdoutLog
+    supervisor_stderr_log = $SupervisorStderrLog
   })
 
   $inputValidation = if ([string]::IsNullOrWhiteSpace([string]$m.input_validation_report)) { Join-Path $RunDir 'phase2_input_validation.json' } else { [string]$m.input_validation_report }
@@ -299,6 +311,10 @@ try {
     scheduled_task_deleted = $false
     launcher = $LauncherMode
     powershell_window_visible = $false
+    stdout_log = $StdoutLog
+    stderr_log = $StderrLog
+    supervisor_stdout_log = $SupervisorStdoutLog
+    supervisor_stderr_log = $SupervisorStderrLog
   })
 
   $supervisorArgs = New-Object System.Collections.Generic.List[string]
@@ -317,7 +333,11 @@ try {
   foreach ($item in $nodeArgs) { $supervisorArgs.Add([string]$item) | Out-Null }
 
   $nodePhase2Executed = $true
-  & node @supervisorArgs 1>> $StdoutLog 2>> $StderrLog
+  # The supervisor opens $StdoutLog and $StderrLog itself so it can pipe the
+  # phase-2 child into them. Redirecting the supervisor process to those same
+  # files makes Windows PowerShell hold conflicting append handles and causes
+  # Node's WriteStream to fail before a progress checkpoint can be written.
+  & node @supervisorArgs 1>> $SupervisorStdoutLog 2>> $SupervisorStderrLog
   $exitCode = $LASTEXITCODE
   $normalRunnerExit = $true
   Add-Content -LiteralPath $StdoutLog -Value "[scheduled] finished_at=$((Get-Date).ToString('o')) exit_code=$exitCode"
@@ -332,6 +352,10 @@ try {
     shutdown_policy_file = [string]$m.shutdown_policy_file
     finished_at = (Get-Date).ToString('o')
     scheduled_task_deleted = $false
+    stdout_log = $StdoutLog
+    stderr_log = $StderrLog
+    supervisor_stdout_log = $SupervisorStdoutLog
+    supervisor_stderr_log = $SupervisorStderrLog
   }
 }
 catch {
@@ -350,6 +374,10 @@ catch {
     shutdown_policy_file = [string]$m.shutdown_policy_file
     finished_at = (Get-Date).ToString('o')
     scheduled_task_deleted = $false
+    stdout_log = $StdoutLog
+    stderr_log = $StderrLog
+    supervisor_stdout_log = $SupervisorStdoutLog
+    supervisor_stderr_log = $SupervisorStderrLog
   })
 }
 finally {

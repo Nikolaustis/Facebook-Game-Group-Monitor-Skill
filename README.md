@@ -1,100 +1,71 @@
-# Facebook Group Monitor Skill V6.6.2
+# Facebook Group Monitor Skill V6.6.4
 
-V6.6.2 is a cumulative Windows-oriented Facebook game-group monitoring package. It preserves the uploaded XLSX field order and adds two reliability corrections: legitimate multi-game groups are retained once for every matched target game, and shutdown finalization is verified by Node.js rather than Windows PowerShell 5.1 parsing the full autosave checkpoint.
+V6.6.4 is a cumulative Windows-oriented Facebook game-group monitoring package. This release fixes two deterministic classification defects found in the Grow a Garden / Grow a Garden 2 run: loss of a valid same-business-region result, and unsafe short-alias substring matching.
 
 ## Main workflow
 
 1. Phase 1 collects group candidates and source-query metadata.
-2. Phase 2 validates all JSON inputs before launch and prefilters irrelevant group names before opening About or discussion pages.
-3. Target titles, aliases, controlled variants, sibling games, and IP-root-only matches are evaluated separately.
-4. Language and region use deterministic evidence first, then configured APIs, a verified standalone Codex CLI, local rules, and controlled GeoNames.
-5. A complete checkpoint is saved after every candidate.
-6. `detail` and `manual_review` retain the workbook field order supplied in the uploaded base package.
-7. Phase-2 startup is considered successful only after a fresh readable progress checkpoint appears.
-8. Queued batches use the built-in retryable handoff workflow.
-9. Chrome closes after verified finalization. Scheduled tasks delete themselves. Shutdown remains prompt-driven and defaults to disabled.
+2. Phase 2 validates its index, task configuration, shutdown policy, and candidate files before launch.
+3. Irrelevant first-round group names are skipped before opening About or discussion pages.
+4. Target titles, aliases, controlled variants, sibling games, and IP-root-only matches are evaluated separately.
+5. Language and region use deterministic evidence first, then configured APIs, a verified standalone Codex CLI, local rules, and controlled GeoNames.
+6. A complete checkpoint is saved after every candidate.
+7. `detail` and `manual_review` retain the authoritative XLSX field order in this package.
+8. Legitimate multi-game groups are retained once for each matched target game.
+9. Chrome closes after verified finalization. Scheduled tasks remove themselves. Shutdown defaults to disabled and follows only the current user instruction.
 
-## Multi-game group output
+## Same-business-region preservation
 
-A Facebook group can legitimately cover several target games. V6.6.2 uses this final-output uniqueness key:
-
-```text
-group_url + game_name
-```
-
-Therefore a group such as:
+When several explicit countries belong to the same business region, their combined result is authoritative. For example:
 
 ```text
-ANIME VANGUARDS / ANIME LAST STAND (BUY / SELL / TRADE)
+Laos + Thailand
+→ LA + TH
+→ SEA
+→ source: country_keyword_and_flag_same_business_region
 ```
 
-is retained twice when both title matches are valid:
+This result is not treated as an unresolved cross-region conflict and does not require About-location adjudication.
+
+## Short-alias matching
+
+Short Latin aliases use token boundaries instead of raw compact substring matching.
 
 ```text
-same group_url + Anime Vanguards
-same group_url + Anime Last Stand
+GAG       → valid Grow a Garden alias
+GAGS      → not GAG
+GAGGED    → not GAG
+9GAG      → not GAG
+GAG2      → not GAG; valid GAG2
+GAG 2     → not GAG; valid GAG2
 ```
 
-Only duplicate rows for the same URL and the same target game are collapsed to the highest-scoring match. `collision_report.json` records:
+Sibling exclusion includes canonical titles, aliases, and configured title variants. This prevents `Grow a Garden 2`, `GAG2`, or `GAG 2` from being attributed to `Grow a Garden` merely because the shorter string appears inside the longer one.
+
+The multi-game rule remains unchanged. A name that independently and explicitly contains two complete target titles may still be retained under both games.
+
+## Resume protection
+
+When resuming a non-finalized checkpoint, rows previously accepted through a strong group-name title match are rechecked against the current title rules. Invalid legacy rows are removed from staged output and counted in:
 
 ```text
-keep_each_matched_game
-deduplicate_same_game_keep_highest_score
+phase2_resume_title_rows_revalidated
+phase2_resume_title_rows_removed
+phase2_resume_title_rows_removed_examples
 ```
 
-New audit statistics:
+## Existing runtime protections
 
-```text
-multi_game_groups_preserved
-multi_game_rows_preserved
-same_game_duplicate_rows_dropped
-```
-
-## Large-checkpoint-safe shutdown verification
-
-The full `phase2_autosave_state.json` can exceed 2 MB. Windows PowerShell 5.1 `ConvertFrom-Json` may fail on such files, even though Node.js wrote and verified them correctly.
-
-V6.6.2 adds:
-
-```text
-scripts/verify_shutdown_state.js
-```
-
-The shutdown coordinator now asks Node.js to read and validate:
-
-- final XLSX, summary, collision, audit, and debug rows;
-- `phase2_autosave_state.json`;
-- `phase2_progress.json`;
-- `codex_task_complete.json`;
-- `shutdown_policy.json`.
-
-Node writes a small report:
-
-```text
-<RunDir>/shutdown_preflight_verification.json
-```
-
-PowerShell reads only this small report before issuing `shutdown.exe`. JSON parse failures are recorded instead of being silently converted to `checkpoint_finalized=false`.
-
-Manual verification command:
-
-```powershell
-npm run phase2:verify-shutdown -- --run-dir ".\runs\your_run"
-```
-
-## Semantic provider order
-
-```text
-configured custom APIs
-→ verified standalone Codex CLI
-→ local rules and controlled GeoNames
-```
-
-The Skill ignores the global `CODEX_CLI_PATH` variable and removes it from semantic child-process environments. Prefer `codex_exec.command`, ordinary PATH/npm discovery, or the optional Skill-private `FB_MONITOR_CODEX_CLI_PATH` override.
+- Supervisor and phase-2 child logs use separate files.
+- Startup success requires a live child and fresh readable progress.
+- Shutdown verification uses Node.js for the full checkpoint.
+- The global `CODEX_CLI_PATH` variable is ignored.
+- JavaScript JSON reads are BOM-safe.
+- PowerShell-generated JSON uses UTF-8 without BOM.
 
 ## Installation
 
-Extract this overlay into the existing Skill root and replace matching files. Do not replace or delete:
+Extract the overlay into the existing Skill root and replace matching files. Preserve:
 
 ```text
 runs/

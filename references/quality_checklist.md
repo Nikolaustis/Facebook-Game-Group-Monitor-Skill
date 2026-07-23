@@ -71,11 +71,26 @@
 - [ ] 接力启动经过实际进度健康检查。
 - [ ] 启动失败按配置重试并写入 `phase2_handoff_status.json`。
 
-## V6.6.2 关键检查
+## V6.6.4 关键检查
 
+- [ ] 短拉丁别名使用完整词边界，不允许 `gag` 命中 `gags`、`gagged`、`9gag`。
+- [ ] 末尾带数字的别名兼容紧凑与分隔写法，例如 `GAG2`、`GAG 2`、`GAG-2`。
+- [ ] 较短别名不得命中数字续接，例如 `GAG` 不得命中 `GAG2` 或 `GAG 2`。
+- [ ] 兄弟排斥证据包含兄弟游戏本名、别名和配置变体。
+- [ ] 同一业务区域内的多个国家证据保留 `_same_business_region` 来源标记。
+- [ ] `LA + TH` 等同一区域组合直接输出 `SEA`，不得进入跨区域 About 仲裁。
+- [ ] 恢复未完成 checkpoint 时，旧的强标题命中行经过当前规则复核。
 - [ ] 同一 URL 同时明确命中多个目标游戏时，每个游戏均保留一条 detail。
 - [ ] 同一 URL、同一游戏的重复行只保留最高分记录。
 - [ ] `collision_report.json` 使用 `keep_each_matched_game` 或 `deduplicate_same_game_keep_highest_score`。
 - [ ] 关机前生成 `shutdown_preflight_verification.json`。
 - [ ] 大型 checkpoint 的 `checkpoint_readable` 与 `checkpoint_finalized` 由 Node verifier 给出。
 - [ ] verifier 失败时记录 read_errors/stdout/stderr，且不得关机。
+
+
+### V6.6.4 supervisor log isolation
+
+- `scheduled_phase2_manifest.json` contains distinct `stdout_log`, `stderr_log`, `supervisor_stdout_log`, and `supervisor_stderr_log`.
+- The scheduled runner never redirects the supervisor process to `stdout_log` or `stderr_log`.
+- `scheduled_phase2_runner_status.json` exposes all four paths.
+- A `node:events` or stream failure must include the supervisor stderr path and an explicit runner status.

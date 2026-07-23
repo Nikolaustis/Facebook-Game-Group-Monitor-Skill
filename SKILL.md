@@ -1,19 +1,19 @@
 ---
 name: facebook-group-monitor
-version: 6.6.2
-description: Two-stage Facebook game-group monitoring with multi-game group preservation, Node-verified shutdown finalization, isolated Codex CLI discovery, API-first semantic region adjudication, BOM-safe inputs, verified startup, durable recovery, retryable handoff, and prompt-driven shutdown.
+version: 6.6.4
+description: Two-stage Facebook game-group monitoring with safe short-alias boundaries, sibling alias exclusion, same-business-region preservation, isolated supervisor logs, verified Windows startup, multi-game output, Node-verified shutdown, API-first semantic adjudication, BOM-safe inputs, durable recovery, and prompt-driven shutdown.
 ---
 
-# Facebook Group Monitor V6.6.2
+# Facebook Group Monitor V6.6.4
 
 ## Operating sequence
 
 1. Collect phase-1 candidates with source-query metadata.
 2. Validate phase-2 index, configuration, shutdown policy, and all candidate files before launch.
 3. Prefilter first-round group names before opening About or discussion pages.
-4. Validate target titles, aliases, controlled variants, sibling titles, and IP-root-only matches.
+4. Validate target titles, aliases, controlled variants, sibling titles, sibling aliases, and IP-root-only matches.
 5. Resolve language and region with deterministic evidence first.
-6. For unresolved risk candidates, use:
+6. For unresolved risk candidates use:
 
 ```text
 custom APIs in configured order
@@ -22,84 +22,70 @@ custom APIs in configured order
 ```
 
 7. Save a complete checkpoint after every candidate.
-8. Generate aligned `detail` and `manual_review` sheets using the authoritative uploaded field order.
+8. Generate aligned `detail` and `manual_review` sheets using the authoritative field order in this package.
 9. Close Chrome after successful finalization and delete completed scheduled tasks.
-10. Default to no shutdown. Generate the run-specific shutdown policy only from the user’s current instruction.
+10. Default to no shutdown. Build the run-specific shutdown policy only from the user's current instruction.
+
+## Mandatory short-alias rule
+
+Never use unrestricted substring matching for a short Latin alias. A short alias must be a standalone token with Latin-letter/number boundaries.
+
+For aliases containing a trailing number, separators between letters and the number are equivalent:
+
+```text
+GAG2 = GAG 2 = GAG-2
+```
+
+A shorter alias ending in letters must not match a numbered continuation:
+
+```text
+GAG does not match GAG2 or GAG 2
+```
+
+It must also not match longer words such as `gags`, `gagged`, or `9gag`.
+
+Sibling exclusion must include each sibling game's canonical title, aliases, and configured title variants. A more specific sibling form must suppress a shorter contained-title match.
+
+## Mandatory same-business-region rule
+
+When explicit country keywords and/or flags identify several countries that all normalize to one business-region bucket, preserve that bucket and mark the source with `_same_business_region`.
+
+Do not send a resolved same-business-region result through cross-region About adjudication. Example:
+
+```text
+LA + TH → SEA
+```
 
 ## Mandatory multi-game output rule
 
-Do not force one Facebook URL to belong to only one game. The authoritative uniqueness key is:
+Final-output uniqueness is:
 
 ```text
 group_url + game_name
 ```
 
-When one group clearly matches several target games, preserve one final `detail` row for each matched game. Do not use `drop_all_tied` for cross-game equal scores.
+When one group independently and clearly matches multiple target games, preserve one final row for each matched game. Only same-URL, same-game duplicates may be collapsed, keeping the highest score.
 
-Only duplicate records that share both the same normalized `group_url` and the same `game_name` may be collapsed. Keep the highest-scoring same-game record and record the discarded duplicates in `collision_report.json`.
+## Mandatory resume revalidation
 
-Expected collision resolutions:
+On resume from a non-finalized full checkpoint, revalidate staged rows whose prior match type was a strong group-name title match. Remove rows that no longer satisfy the current title and sibling rules, and record the removal count and examples in runtime statistics.
 
-```text
-keep_each_matched_game
-deduplicate_same_game_keep_highest_score
-```
+## Mandatory supervisor-log isolation
 
-## Mandatory shutdown verification rule
+`phase2_supervisor.js` owns the phase-2 child stdout and stderr files. `scheduled_phase2_runner.ps1` must write supervisor wrapper output to separate files. Do not treat a PID alone as startup success; require a live phase-2 child and fresh readable `phase2_progress.json`.
 
-Do not parse the full `phase2_autosave_state.json` with Windows PowerShell 5.1 `ConvertFrom-Json` as the authoritative shutdown check. Large checkpoints can exceed PowerShell’s reliable JSON parsing range.
+## Mandatory shutdown verification
 
-Use:
-
-```text
-scripts/verify_shutdown_state.js
-```
-
-The Node verifier must read the large checkpoint, progress, completion, policy, and final outputs, then write:
-
-```text
-<RunDir>/shutdown_preflight_verification.json
-```
-
-The runner coordinator and direct watcher may issue shutdown only when the small verification report has `all_valid=true` and the current deadline policy permits shutdown. Any JSON read failure must be recorded in `read_errors`; it must not be silently represented as a false finalization flag.
+Use `scripts/verify_shutdown_state.js` to read the full checkpoint, progress, completion, policy, and final outputs. PowerShell may issue shutdown only from the small generated verification report with `all_valid=true` and a currently permitted shutdown policy.
 
 ## Mandatory Codex CLI isolation
 
-Never create, set, recommend, or depend on the global environment variable:
-
-```text
-CODEX_CLI_PATH
-```
-
-Use this discovery order:
-
-```text
-codex_exec.command in the private local configuration
-→ FB_MONITOR_CODEX_CLI_PATH, only when an override is necessary
-→ PATH / where.exe / Get-Command
-→ npm and standalone CLI installation paths
-```
-
-Prefer:
-
-```json
-"codex_exec": {
-  "command": "codex"
-}
-```
+Never create, set, recommend, or depend on the global `CODEX_CLI_PATH` environment variable. Prefer private configuration, normal PATH/npm discovery, or the Skill-specific `FB_MONITOR_CODEX_CLI_PATH` override.
 
 ## Mandatory JSON handling
 
-Use `scripts/json_io.js` for JavaScript JSON reads. PowerShell-generated JSON must use UTF-8 without BOM through package helpers. Do not use ad hoc `Set-Content -Encoding UTF8` for phase indexes, task configurations, manifests, policies, or status JSON.
-
-## Verified startup contract
-
-A PID is not proof of successful collection. Startup is successful only when the input preflight passed, the phase-2 child process is alive, and a fresh readable `phase2_progress.json` exists. Startup failures must retain the exit code and stderr tail.
-
-## Chained task requests
-
-Use `scripts/queue_phase2_after_current.ps1` when the user asks to run another second-round batch after the current Facebook task. Do not create temporary wait scripts when the built-in handoff can represent the request.
+Use `scripts/json_io.js` for JavaScript JSON reads. PowerShell-generated JSON must use UTF-8 without BOM.
 
 ## XLSX output contract
 
-The workbook field order in this package is authoritative. `manual_review` begins with the same columns as `detail`; review-only fields follow afterward. New audit fields must be appended and must not reorder existing columns.
+The workbook field order in this package is authoritative. `manual_review` begins with the same columns as `detail`; review-only fields follow afterward. New audit fields may be appended but must not reorder existing columns.

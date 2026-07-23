@@ -57,6 +57,29 @@ function tailFile(file, maxBytes = 12000) {
   } catch (_err) { return ''; }
 }
 
+
+function openAppendStream(file, label, runnerStatus) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const fd = fs.openSync(file, 'a');
+    const stream = fs.createWriteStream(file, { fd, autoClose: true, flags: 'a' });
+    return { stream, error: null };
+  } catch (err) {
+    const message = `${label}_open_failed: ${err && err.message ? err.message : err}`;
+    try {
+      updateStatus(runnerStatus, {
+        status: 'supervisor_log_open_failed',
+        startup_verified: false,
+        log_file: file,
+        log_label: label,
+        spawn_error: message,
+        failed_at: new Date().toISOString(),
+      });
+    } catch (_err) {}
+    throw new Error(message);
+  }
+}
+
 function getProgressSignal(file, startedMs, previousMtimeMs) {
   try {
     if (!file || !fs.existsSync(file)) return null;
@@ -88,10 +111,30 @@ function getProgressSignal(file, startedMs, previousMtimeMs) {
   const childArgs = child.slice(1);
   const previousProgressMtime = fs.existsSync(progressFile) ? fs.statSync(progressFile).mtimeMs : 0;
   const startedMs = Date.now();
-  fs.mkdirSync(path.dirname(stdoutLog), { recursive: true });
-  fs.mkdirSync(path.dirname(stderrLog), { recursive: true });
-  const outStream = fs.createWriteStream(stdoutLog, { flags: 'a' });
-  const errStream = fs.createWriteStream(stderrLog, { flags: 'a' });
+  if (path.resolve(stdoutLog).toLowerCase() === path.resolve(stderrLog).toLowerCase()) {
+    throw new Error(`Supervisor child stdout and stderr logs must be different files: ${stdoutLog}`);
+  }
+  const outHandle = openAppendStream(stdoutLog, 'child_stdout_log', runnerStatus);
+  const errHandle = openAppendStream(stderrLog, 'child_stderr_log', runnerStatus);
+  const outStream = outHandle.stream;
+  const errStream = errHandle.stream;
+  let streamFailure = null;
+  const onStreamError = (label) => (err) => {
+    if (!streamFailure) {
+      streamFailure = { label, reason: err && err.message ? err.message : String(err) };
+      try {
+        updateStatus(runnerStatus, {
+          status: 'supervisor_log_stream_error',
+          startup_verified: false,
+          log_label: label,
+          spawn_error: streamFailure.reason,
+          failed_at: new Date().toISOString(),
+        });
+      } catch (_err) {}
+    }
+  };
+  outStream.on('error', onStreamError('child_stdout_log'));
+  errStream.on('error', onStreamError('child_stderr_log'));
   outStream.write(`[supervisor] child_starting_at=${new Date().toISOString()} script=${childScript}\n`);
 
   const childProcess = spawn(process.execPath, [childScript, ...childArgs], {
@@ -123,6 +166,7 @@ function getProgressSignal(file, startedMs, previousMtimeMs) {
   while (Date.now() - startedMs < startupTimeoutMs) {
     health = getProgressSignal(progressFile, startedMs, previousProgressMtime);
     if (health) break;
+    if (streamFailure) { if (processAlive(childProcess.pid)) killTree(childProcess.pid); break; }
     if (exitInfo || !processAlive(childProcess.pid)) break;
     await sleep(1000);
   }
@@ -132,13 +176,13 @@ function getProgressSignal(file, startedMs, previousMtimeMs) {
     await sleep(300);
     const stderrTail = tailFile(stderrLog);
     updateStatus(runnerStatus, {
-      status: exitInfo ? 'phase2_startup_failed' : 'phase2_startup_timeout',
+      status: streamFailure ? 'supervisor_log_stream_error' : (exitInfo ? 'phase2_startup_failed' : 'phase2_startup_timeout'),
       phase2_child_pid: childProcess.pid,
       phase2_child_alive: false,
       startup_verified: false,
       exit_code: exitInfo?.code ?? 1,
       signal: exitInfo?.signal || '',
-      spawn_error: exitInfo?.spawn_error || '',
+      spawn_error: streamFailure?.reason || exitInfo?.spawn_error || '',
       stderr_tail: stderrTail.slice(-6000),
       startup_failed_at: new Date().toISOString(),
     });
@@ -158,7 +202,14 @@ function getProgressSignal(file, startedMs, previousMtimeMs) {
   });
   outStream.write(`[supervisor] startup_verified_at=${new Date().toISOString()} stage=${health.stage || ''}\n`);
 
-  while (!exitInfo) await sleep(500);
+  while (!exitInfo) {
+    if (streamFailure) {
+      if (processAlive(childProcess.pid)) killTree(childProcess.pid);
+      break;
+    }
+    await sleep(500);
+  }
+  if (streamFailure && !exitInfo) exitInfo = { code: 4, signal: '', spawn_error: streamFailure.reason };
   const success = exitInfo.code === 0;
   updateStatus(runnerStatus, {
     status: success ? 'finished_success' : 'finished_error',
@@ -167,7 +218,7 @@ function getProgressSignal(file, startedMs, previousMtimeMs) {
     startup_verified: true,
     exit_code: exitInfo.code,
     signal: exitInfo.signal || '',
-    spawn_error: exitInfo.spawn_error || '',
+    spawn_error: streamFailure?.reason || exitInfo.spawn_error || '',
     finished_at: new Date().toISOString(),
     stderr_tail: success ? '' : tailFile(stderrLog).slice(-6000),
   });

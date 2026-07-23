@@ -1,7 +1,7 @@
 {
-  "name": "fb-group-monitor-skill-v6-6-2",
-  "version": "6.6.2",
-  "description": "Two-stage Facebook game-group monitor with multi-game group preservation, Node-verified shutdown finalization, isolated Codex CLI discovery, API-first semantic adjudication, BOM-safe inputs, verified startup, durable checkpoints, retryable handoff, and prompt-driven shutdown.",
+  "name": "fb-group-monitor-skill-v6-6-4",
+  "version": "6.6.4",
+  "description": "Two-stage Facebook game-group monitor with safe short-alias boundaries, sibling alias exclusion, same-business-region preservation, isolated supervisor logs, verified Windows startup, multi-game output, Node-verified shutdown, API-first semantic adjudication, BOM-safe inputs, durable recovery, and prompt-driven shutdown.",
   "private": true,
   "scripts": {
     "login": "powershell -ExecutionPolicy Bypass -File .\\scripts\\open_chrome_9222.ps1",

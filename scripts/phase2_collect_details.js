@@ -1249,7 +1249,15 @@ function combineExplicitRegionEvidence(matches, combinedSource = 'country_keywor
   }));
   if (regions.length === 1) {
     const nonEmpty = valid.filter((m) => m.region);
-    const source = nonEmpty.length === 1 ? nonEmpty[0].source : combinedSource;
+    const evidenceRegions = unique(hits.map((hit) => normalizeRegionOutput(hit && hit.region)).filter(Boolean));
+    const collapsedEvidenceRegion = resolveSameBusinessRegionConflict(evidenceRegions);
+    const sameBusinessRegionWasCollapsed = evidenceRegions.length > 1
+      && collapsedEvidenceRegion
+      && collapsedEvidenceRegion === regions[0];
+    const sourceAlreadyMarksSameBusinessRegion = valid.some((m) => String(m.source || '').endsWith('_same_business_region'));
+    const source = sameBusinessRegionWasCollapsed || sourceAlreadyMarksSameBusinessRegion
+      ? `${combinedSource}_same_business_region`
+      : (nonEmpty.length === 1 ? nonEmpty[0].source : combinedSource);
     return { region: regions[0], source, keyword_hits: hits };
   }
   if (regions.length > 1) {
@@ -2276,7 +2284,18 @@ function distinctMatchedRegions(regionMatch) {
 }
 
 function hasMultipleRegionEvidence(regionMatch) {
-  return distinctMatchedRegions(regionMatch).length > 1;
+  const regions = distinctMatchedRegions(regionMatch);
+  if (regions.length <= 1) return false;
+  const resolvedRegion = normalizeRegionOutput(regionMatch && regionMatch.region);
+  const sameBusinessRegion = resolveSameBusinessRegionConflict(regions);
+  if (
+    sameBusinessRegion
+    && resolvedRegion === sameBusinessRegion
+    && String(regionMatch && regionMatch.source || '').endsWith('_same_business_region')
+  ) {
+    return false;
+  }
+  return true;
 }
 
 // A group name that explicitly advertises both Southeast Asia and Europe is
@@ -2846,37 +2865,109 @@ function buildGameProfileV3(gameName, aliases, siblingTitles, ipRoots, config = 
   };
 }
 
-function phrasePresent(compactText, compactPhrases) {
+function buildProfilesForGames(gameEntries, aliasesConfig, siblingTitlesConfig, ipRootsConfig, config = {}) {
+  const allGameNames = (Array.isArray(gameEntries) ? gameEntries : [])
+    .map((entry) => clean(entry && entry.game_name))
+    .filter(Boolean);
+  const profiles = new Map();
+  for (const entry of (Array.isArray(gameEntries) ? gameEntries : [])) {
+    const gameName = clean(entry && entry.game_name);
+    if (!gameName) continue;
+    const automaticSiblingTitles = allGameNames.filter((name) => name && name !== gameName);
+    const configuredSiblings = Array.isArray(siblingTitlesConfig && siblingTitlesConfig[gameName])
+      ? siblingTitlesConfig[gameName]
+      : [];
+    const siblingGameNames = unique([...configuredSiblings, ...automaticSiblingTitles]);
+    const siblingPhrases = unique(siblingGameNames.flatMap((siblingName) => [
+      siblingName,
+      ...((Array.isArray(aliasesConfig && aliasesConfig[siblingName])) ? aliasesConfig[siblingName] : []),
+      ...buildConfiguredTitleVariants(siblingName, config).map((variant) => clean(variant && variant.query)),
+    ]));
+    profiles.set(
+      gameName,
+      buildGameProfileV3(
+        gameName,
+        (aliasesConfig && aliasesConfig[gameName]) || [],
+        siblingPhrases,
+        (ipRootsConfig && ipRootsConfig[gameName]) || [],
+        config,
+      ),
+    );
+  }
+  return { allGameNames, profiles };
+}
+
+function isShortStandaloneGameAlias(phrase) {
+  const compact = normalizeCompact(phrase);
+  const normalized = normalizeWords(phrase).trim();
+  return Boolean(
+    compact
+    && compact.length <= 5
+    && /^[a-z0-9]+$/i.test(compact)
+    && normalized
+    && !normalized.includes(' ')
+  );
+}
+
+function buildShortGameAliasPattern(phrase) {
+  const compact = normalizeCompact(phrase);
+  if (!isShortStandaloneGameAlias(phrase)) return null;
+  const segments = compact.match(/[a-z]+|[0-9]+/gi) || [compact];
+  const body = segments.map((segment) => escapeRegExp(segment)).join('[\\s\\p{P}\\p{S}_]*');
+  const numericContinuationGuard = /[a-z]$/i.test(compact)
+    ? '(?![\\s\\p{P}\\p{S}_]*[0-9])'
+    : '';
+  return new RegExp(
+    `(^|[^\\p{Script=Latin}\\p{Number}])${body}${numericContinuationGuard}(?=$|[^\\p{Script=Latin}\\p{Number}])`,
+    'iu',
+  );
+}
+
+function shortGameAliasMatches(text, phrase) {
+  const pattern = buildShortGameAliasPattern(phrase);
+  return Boolean(pattern && pattern.test(String(text || '').normalize('NFKC')));
+}
+
+function phrasePresent(text, rawPhrases) {
+  const sourceText = clean(text || '');
+  const compactText = normalizeCompact(sourceText);
   let best = '';
-  for (const p of compactPhrases) {
-    if (p && compactText.includes(p) && p.length > best.length) best = p;
+  for (const phrase of rawPhrases || []) {
+    const raw = clean(phrase);
+    const compact = normalizeCompact(raw);
+    if (!raw || !compact) continue;
+    const matched = isShortStandaloneGameAlias(raw)
+      ? shortGameAliasMatches(sourceText, raw)
+      : compactText.includes(compact);
+    if (matched && compact.length > best.length) best = compact;
   }
   return best;
 }
 
-function phrasePresentWords(normText, rawPhrases) {
-  const padded = ` ${normalizeWords(normText)} `;
+function phrasePresentWords(text, rawPhrases) {
+  const sourceText = clean(text || '');
+  const padded = ` ${normalizeWords(sourceText)} `;
   let best = '';
   for (const phrase of rawPhrases || []) {
-    const normalized = normalizeWords(phrase).trim();
+    const raw = clean(phrase);
+    const normalized = normalizeWords(raw).trim();
     if (!normalized) continue;
-    if (padded.includes(` ${normalized} `) && normalized.length > best.length) best = normalized;
+    const matched = isShortStandaloneGameAlias(raw)
+      ? shortGameAliasMatches(sourceText, raw)
+      : padded.includes(` ${normalized} `);
+    if (matched && normalizeCompact(raw).length > normalizeCompact(best).length) best = normalized;
   }
   return best;
 }
 
 function variantPhrasePresent(groupName, variants) {
-  const normGroup = normalizeWords(groupName || '');
-  const compactGroup = normalizeCompact(groupName || '');
   let best = null;
   for (const variant of variants || []) {
     const phrase = clean(variant.query);
     if (!phrase) continue;
-    const norm = normalizeWords(phrase).trim();
-    const compact = normalizeCompact(phrase);
-    const matched = (norm && ` ${normGroup} `.includes(` ${norm} `)) || (compact && compactGroup.includes(compact));
+    const matched = phrasePresentWords(groupName || '', [phrase]) || phrasePresent(groupName || '', [phrase]);
     if (!matched) continue;
-    if (!best || compact.length > normalizeCompact(best.query).length) best = variant;
+    if (!best || normalizeCompact(phrase).length > normalizeCompact(best.query).length) best = variant;
   }
   return best;
 }
@@ -2892,9 +2983,9 @@ function matchGame(profile, groupName, aboutText, snippet) {
   const compactGroup = normalizeCompact(groupName || '');
   const compactFull = normalizeCompact(fullText);
   const exactGroupWords = phrasePresentWords(groupName || '', profile.rawPhrases);
-  const compactGroupHit = phrasePresent(compactGroup, profile.compactPhrases);
+  const compactGroupHit = phrasePresent(groupName || '', profile.rawPhrases);
   const connectorXHit = variantPhrasePresent(groupName || '', profile.connectorXVariants || []);
-  const negativeGroup = phrasePresent(compactGroup, profile.siblingCompactPhrases || []);
+  const negativeGroup = phrasePresent(groupName || '', profile.siblingRawPhrases || []);
 
   if (negativeGroup && (!compactGroupHit || negativeGroup.length > compactGroupHit.length)) {
     return {
@@ -2957,7 +3048,7 @@ function matchGame(profile, groupName, aboutText, snippet) {
     };
   }
 
-  const exactFull = phrasePresent(compactFull, profile.compactPhrases);
+  const exactFull = phrasePresent(fullText, profile.rawPhrases);
   if (exactFull) {
     return {
       matched: false,
@@ -2970,7 +3061,7 @@ function matchGame(profile, groupName, aboutText, snippet) {
     };
   }
 
-  const ipRootHit = phrasePresent(compactGroup, profile.ipRootCompactPhrases || []);
+  const ipRootHit = phrasePresent(groupName || '', profile.ipRootRawPhrases || []);
   if (ipRootHit) {
     return {
       matched: false,
@@ -2992,6 +3083,41 @@ function matchGame(profile, groupName, aboutText, snippet) {
     review_reason: '',
     manual_review: false,
   };
+}
+
+const RESUME_STRONG_GROUP_NAME_MATCH_TYPES = new Set([
+  'exact_phrase_in_group_name',
+  'compact_title_in_group_name',
+  'connector_x_title_in_group_name',
+]);
+
+function revalidateResumedStrongTitleRows(rows, profiles) {
+  const kept = [];
+  const removed = [];
+  for (const row of (Array.isArray(rows) ? rows : [])) {
+    const profile = profiles && profiles.get(clean(row && row.game_name));
+    const previousMatchType = clean(row && row.__match_type);
+    if (!profile || !RESUME_STRONG_GROUP_NAME_MATCH_TYPES.has(previousMatchType)) {
+      kept.push(row);
+      continue;
+    }
+    const currentMatch = matchGame(profile, clean(row && row.group_name), '', '');
+    if (currentMatch.matched) {
+      kept.push(row);
+      continue;
+    }
+    removed.push({
+      game_name: clean(row && row.game_name),
+      group_name: clean(row && row.group_name),
+      group_url: clean(row && row.group_url),
+      previous_match_type: previousMatchType,
+      previous_matched_phrase: clean(row && row.__matched_phrase),
+      current_match_type: currentMatch.type || 'no_match',
+      current_negative_hit: currentMatch.negative_hit || '',
+      reason: currentMatch.review_reason || 'no_longer_matches_current_title_rules',
+    });
+  }
+  return { kept, removed };
 }
 
 
@@ -3921,22 +4047,13 @@ function resolveCollisions(rows) {
     process.exit(1);
   }
 
-  const allGameNames = gameEntries.map((g) => clean(g.game_name)).filter(Boolean);
-  const profiles = new Map();
-  for (const g of gameEntries) {
-    const automaticSiblingTitles = allGameNames.filter((name) => name && name !== g.game_name);
-    const configuredSiblings = siblingTitlesConfig[g.game_name] || [];
-    profiles.set(
-      g.game_name,
-      buildGameProfileV3(
-        g.game_name,
-        aliasesConfig[g.game_name] || [],
-        unique([...(Array.isArray(configuredSiblings) ? configuredSiblings : []), ...automaticSiblingTitles]),
-        ipRootsConfig[g.game_name] || [],
-        config
-      )
-    );
-  }
+  const { allGameNames, profiles } = buildProfilesForGames(
+    gameEntries,
+    aliasesConfig,
+    siblingTitlesConfig,
+    ipRootsConfig,
+    config,
+  );
 
   const globalGameEntityMaskPhrases = unique([
     ...allGameNames,
@@ -4184,11 +4301,16 @@ function resolveCollisions(rows) {
       ? resumeState.stats
       : null;
     if (resumeState) {
-      for (const row of (Array.isArray(resumeState.staged_rows) ? resumeState.staged_rows : [])) stagedRows.push(row);
+      const resumedStagedRows = Array.isArray(resumeState.staged_rows) ? resumeState.staged_rows : [];
+      const resumedTitleRevalidation = revalidateResumedStrongTitleRows(resumedStagedRows, profiles);
+      for (const row of resumedTitleRevalidation.kept) stagedRows.push(row);
       for (const row of (Array.isArray(resumeState.manual_review_rows) ? resumeState.manual_review_rows : [])) manualReviewRows.push(row);
       if (resumeStats) Object.assign(stats, resumeStats);
       stats.phase2_resume_enabled = 1;
       stats.phase2_resume_source = 'full_autosave_checkpoint';
+      stats.phase2_resume_title_rows_revalidated = resumedStagedRows.length;
+      stats.phase2_resume_title_rows_removed = resumedTitleRevalidation.removed.length;
+      stats.phase2_resume_title_rows_removed_examples = resumedTitleRevalidation.removed.slice(0, 20);
       currentGameName = resumeProgress.current_game_name || '';
       currentGameIndex = Number(resumeProgress.current_game_index || -1);
       currentCandidateIndex = Number(resumeProgress.current_candidate_index || -1);
@@ -4206,6 +4328,8 @@ function resolveCollisions(rows) {
         total_processed_candidates: totalProcessedCandidates,
         staged_rows: stagedRows.length,
         manual_review_rows: manualReviewRows.length,
+        resume_title_rows_revalidated: stats.phase2_resume_title_rows_revalidated || 0,
+        resume_title_rows_removed: stats.phase2_resume_title_rows_removed || 0,
       }));
     } else {
       stats.phase2_resume_enabled = 0;

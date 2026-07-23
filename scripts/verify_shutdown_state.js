@@ -124,7 +124,7 @@ function main() {
   const report = {
     verification_kind: 'facebook_group_monitor_shutdown_preflight',
     verification_version: 1,
-    skill_version: '6.6.2',
+    skill_version: '6.6.4',
     checked_at: new Date().toISOString(),
     run_dir: runDir,
     coordinator_mode: coordinatorMode,

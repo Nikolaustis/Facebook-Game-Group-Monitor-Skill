@@ -259,6 +259,10 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
   $tsScheduled = Get-Date -Format "yyyyMMdd_HHmmss"
   $StdoutLog = Join-Path $RunDir "scheduled_phase2_$tsScheduled.stdout.log"
   $StderrLog = Join-Path $RunDir "scheduled_phase2_$tsScheduled.stderr.log"
+  # The supervisor itself must never inherit redirection to the same files it opens
+  # for the phase-2 child. Keep wrapper diagnostics in distinct timestamped files.
+  $SupervisorStdoutLog = Join-Path $RunDir "phase2_supervisor_$tsScheduled.stdout.log"
+  $SupervisorStderrLog = Join-Path $RunDir "phase2_supervisor_$tsScheduled.stderr.log"
   $StatusFile = Join-Path $RunDir "background_task.json"
   $Manifest = Join-Path $RunDir "scheduled_phase2_manifest.json"
   $Runner = Join-Path $RootDir "scripts\scheduled_phase2_runner.ps1"
@@ -301,7 +305,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
 
   $manifestPayload = [ordered]@{
     manifest_kind = "facebook_group_monitor_scheduled_phase2"
-    manifest_version = 5
+    manifest_version = 6
     root_dir = $RootDir
     run_dir = $RunDir
     index = $Index
@@ -330,6 +334,8 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     scheduler_diagnostic = $SchedulerDiagnostic
     stdout_log = $StdoutLog
     stderr_log = $StderrLog
+    supervisor_stdout_log = $SupervisorStdoutLog
+    supervisor_stderr_log = $SupervisorStderrLog
     out_xlsx = (Join-Path $RunDir "fb_monitoring_filtered.xlsx")
     out_summary = (Join-Path $RunDir "fb_monitoring_filtered_summary.json")
     out_collision = (Join-Path $RunDir "collision_report.json")
@@ -384,7 +390,7 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
       $arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Bootstrap`""
       $action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument $arguments -WorkingDirectory $RootDir
     }
-    Register-ScheduledTask -TaskName $ScheduledTaskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description "Facebook Group Monitor V6.6.2 phase 2; verified startup; reboot-resumable; self-deletes after execution." -Force | Out-Null
+    Register-ScheduledTask -TaskName $ScheduledTaskName -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description "Facebook Group Monitor V6.6.4 phase 2; safe alias boundaries; same-business-region preservation; isolated supervisor logs; verified startup; reboot-resumable; self-deletes after execution." -Force | Out-Null
     Start-ScheduledTask -TaskName $ScheduledTaskName
   }
 
@@ -476,6 +482,8 @@ if ($Task -eq "phase2" -and -not $DirectBackground) {
     scheduler_diagnostic = $SchedulerDiagnostic
     stdout_log = $StdoutLog
     stderr_log = $StderrLog
+    supervisor_stdout_log = $SupervisorStdoutLog
+    supervisor_stderr_log = $SupervisorStderrLog
     cdp = $Cdp
     progress_file = (Join-Path $RunDir "codex_progress_report.json")
     phase2_progress_file = (Join-Path $RunDir "phase2_progress.json")

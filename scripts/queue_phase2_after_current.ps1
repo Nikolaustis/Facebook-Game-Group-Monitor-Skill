@@ -46,7 +46,7 @@ function Write-Utf8NoBom([string]$Path, [string]$Text) {
 function Write-Status([string]$Status, [hashtable]$Extra = @{}) {
   $payload = [ordered]@{
     handoff_kind = 'facebook_group_monitor_phase2_handoff'
-    version = '6.6.2'
+    version = '6.6.4'
     status = $Status
     current_run_dir = $CurrentRunDir
     target_run_dir = $RunDir
